@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -228,7 +229,7 @@ class ReceivingEvidenceTests(unittest.TestCase):
     def _freeze(self) -> dict[str, Any]:
         return experiment.create_freeze_payload_for_verification()
 
-    def test_pinned_nova_factory_uses_pinned_session_with_real_bedrock_constructor(self) -> None:
+    def test_pinned_opus_factory_uses_pinned_session_with_real_bedrock_constructor(self) -> None:
         import boto3
         from strands.models import BedrockModel
 
@@ -257,15 +258,67 @@ class ReceivingEvidenceTests(unittest.TestCase):
 
         session = FakeSession()
         with patch.object(boto3, "Session", return_value=session) as session_constructor:
-            model = experiment.pinned_nova_pro_factory("single", 1024)
+            model = experiment.pinned_opus_4_6_factory("single", 1024)
 
         self.assertIsInstance(model, BedrockModel)
+        self.assertEqual(experiment.MODEL_ID, "us.anthropic.claude-opus-4-6-v1")
         session_constructor.assert_called_once_with(
             profile_name="missing20-sandbox", region_name="us-west-2"
         )
         self.assertEqual(len(session.client_calls), 1)
         self.assertEqual(session.client_calls[0]["region_name"], "us-west-2")
         self.assertEqual(model.client.meta.region_name, "us-west-2")
+
+    def test_opus_budget_and_freeze_pin_pricing_and_maximum_cost(self) -> None:
+        maximum_cost = Decimal("32000") * Decimal("0.0000055") + Decimal("6000") * Decimal(
+            "0.0000275"
+        )
+        freeze = self._freeze()
+
+        self.assertEqual(maximum_cost, Decimal("0.3410000"))
+        self.assertEqual(experiment.WORKFLOW_CAPS.input_price_per_token, Decimal("0.0000055"))
+        self.assertEqual(experiment.WORKFLOW_CAPS.output_price_per_token, Decimal("0.0000275"))
+        self.assertEqual(experiment.WORKFLOW_CAPS.cost_cap_usd, Decimal("0.35"))
+        self.assertLessEqual(maximum_cost, experiment.WORKFLOW_CAPS.cost_cap_usd)
+        self.assertEqual(freeze["workflow_budget"]["input_price_usd_per_token"], "0.0000055")
+        self.assertEqual(freeze["workflow_budget"]["output_price_usd_per_token"], "0.0000275")
+        self.assertEqual(freeze["workflow_budget"]["estimated_cost_cap_usd"], "0.35")
+
+    def test_global_budget_carries_forward_settled_nova_cost_before_opus_reservations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = Path(directory) / "ledger.jsonl"
+            experiment._private_append_jsonl(
+                ledger_path,
+                {
+                    "schema_version": experiment.SCHEMA_VERSION,
+                    "event": "reserve_workflow",
+                    "run_id": "historical-nova-v7",
+                    "candidate": "single",
+                    "case_sha256": "historical-synthetic-case",
+                    "reserved_cost_usd": "0.06",
+                    "timestamp": "2026-09-12T00:00:00+00:00",
+                },
+            )
+            experiment._private_append_jsonl(
+                ledger_path,
+                {
+                    "schema_version": experiment.SCHEMA_VERSION,
+                    "event": "settle_workflow",
+                    "run_id": "historical-nova-v7",
+                    "charged_cost_usd": "0.0461952",
+                    "status": "FAILED",
+                    "timestamp": "2026-09-12T00:01:00+00:00",
+                },
+            )
+            ledger = experiment.DurableExperimentLedger(ledger_path)
+            for index in range(8):
+                ledger.reserve_workflow(
+                    run_id=f"opus-{index}", candidate="single", case_hash=f"case-{index}"
+                )
+            with self.assertRaises(experiment.BudgetError):
+                ledger.reserve_workflow(
+                    run_id="opus-over-cap", candidate="single", case_hash="case-over-cap"
+                )
 
     def _evaluate_single_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         case = _case()

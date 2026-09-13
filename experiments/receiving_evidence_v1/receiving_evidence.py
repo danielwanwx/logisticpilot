@@ -12,7 +12,7 @@ Run it only from the prepared isolated environment::
 
 The CLI requires caller-owned case/key paths, a durable experiment ledger, a
 private JSONL run log, and a previously generated candidate freeze manifest.
-The only live path is an explicit ``--execute-model`` using the pinned Nova
+The only live path is an explicit ``--execute-model`` using the pinned Opus 4.6
 factory below; tests pass local models directly to the non-CLI functions.
 """
 
@@ -58,13 +58,13 @@ from strands_evals.types import EvaluationData, EvaluationOutput
 
 SCHEMA_VERSION = "receiving-evidence-v1"
 FREEZE_SCHEMA_VERSION = "receiving-evidence-freeze-v1"
-MODEL_ID = "us.amazon.nova-pro-v1:0"
+MODEL_ID = "us.anthropic.claude-opus-4-6-v1"
 MODEL_REGION = "us-west-2"
 AWS_PROFILE = "missing20-sandbox"
 MODEL_TEMPERATURE = 0.0
 SOURCE_MODE = "synthetic_snapshot"
 MAX_REQUEST_OUTPUT_TOKENS = 1_024
-WORKFLOW_COST_CAP_USD = Decimal("0.06")
+WORKFLOW_COST_CAP_USD = Decimal("0.35")
 EXPERIMENT_COST_CAP_USD = Decimal("3.00")
 WORKFLOW_TIMEOUT_SECONDS = 180.0
 SOURCE_RECEIVING = "receiving_quality"
@@ -428,8 +428,8 @@ class WorkflowCaps:
     max_output_per_request: int = MAX_REQUEST_OUTPUT_TOKENS
     cost_cap_usd: Decimal = WORKFLOW_COST_CAP_USD
     timeout_seconds: float = WORKFLOW_TIMEOUT_SECONDS
-    input_price_per_token: Decimal = Decimal("0.0000008")
-    output_price_per_token: Decimal = Decimal("0.0000032")
+    input_price_per_token: Decimal = Decimal("0.0000055")
+    output_price_per_token: Decimal = Decimal("0.0000275")
 
 
 WORKFLOW_CAPS = WorkflowCaps()
@@ -1370,7 +1370,7 @@ class ModelFactory(Protocol):
     def __call__(self, stage: str, max_tokens: int) -> Model: ...
 
 
-def pinned_nova_pro_factory(stage: str, max_tokens: int) -> Model:
+def pinned_opus_4_6_factory(stage: str, max_tokens: int) -> Model:
     """Create the one admissible live model without transport retries.
 
     It is intentionally not called unless the CLI receives ``--execute-model``.
@@ -2231,6 +2231,8 @@ def create_freeze_manifest(path: Path) -> dict[str, Any]:
             "max_requests": WORKFLOW_CAPS.max_requests,
             "max_input_tokens": WORKFLOW_CAPS.max_input_tokens,
             "max_output_tokens": WORKFLOW_CAPS.max_output_tokens,
+            "input_price_usd_per_token": _decimal_text(WORKFLOW_CAPS.input_price_per_token),
+            "output_price_usd_per_token": _decimal_text(WORKFLOW_CAPS.output_price_per_token),
             "estimated_cost_cap_usd": _decimal_text(WORKFLOW_CAPS.cost_cap_usd),
             "wall_clock_seconds": WORKFLOW_CAPS.timeout_seconds,
             "stages": {stage: caps.model_dump(mode="json") for stage, caps in STAGE_CAPS.items()},
@@ -2278,6 +2280,8 @@ def create_freeze_payload_for_verification() -> dict[str, Any]:
             "max_requests": WORKFLOW_CAPS.max_requests,
             "max_input_tokens": WORKFLOW_CAPS.max_input_tokens,
             "max_output_tokens": WORKFLOW_CAPS.max_output_tokens,
+            "input_price_usd_per_token": _decimal_text(WORKFLOW_CAPS.input_price_per_token),
+            "output_price_usd_per_token": _decimal_text(WORKFLOW_CAPS.output_price_per_token),
             "estimated_cost_cap_usd": _decimal_text(WORKFLOW_CAPS.cost_cap_usd),
             "wall_clock_seconds": WORKFLOW_CAPS.timeout_seconds,
             "stages": {stage: caps.model_dump(mode="json") for stage, caps in STAGE_CAPS.items()},
@@ -2582,7 +2586,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--execute-model",
         action="store_true",
         help=(
-            "explicitly permit the pinned Nova Pro factory; absent by default "
+            "explicitly permit the pinned Opus 4.6 factory; absent by default "
             "to avoid provider calls"
         ),
     )
@@ -2620,7 +2624,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 case=case,
                 key=key,
                 candidate=cast(CandidateName, args.candidate),
-                model_factory=pinned_nova_pro_factory if args.candidate != "rules" else None,
+                model_factory=pinned_opus_4_6_factory if args.candidate != "rules" else None,
                 freeze_manifest=manifest,
                 durable_ledger=DurableExperimentLedger(args.ledger),
                 run_log=args.run_log,
