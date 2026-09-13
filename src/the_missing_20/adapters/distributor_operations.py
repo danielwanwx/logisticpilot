@@ -18,6 +18,7 @@ from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+from inspect import Parameter, signature
 from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol, cast
@@ -40,7 +41,13 @@ from the_missing_20.agents.distributor_economics import (
 from the_missing_20.agents.distributor_economics import (
     economic_projection as project_economics,
 )
-from the_missing_20.agents.photo_receiving import PhotoAssessment, normalize_photo
+from the_missing_20.agents.photo_receiving import (
+    PhotoAssessment,
+    PhotoDetailAssessment,
+    PhotoLabelAssessment,
+    PhotoPurpose,
+    normalize_photo,
+)
 
 DISTRIBUTOR_OPERATIONS_SCHEMA_VERSION = "missing20-distributor-operations/v1"
 _SUCCESS = frozenset({"APPLIED", "ALREADY_APPLIED"})
@@ -254,7 +261,7 @@ class DistributorOperations:
         ask_turn: Callable[[str, Mapping[str, object]], Mapping[str, object]] | None = None,
         allocation_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
         economic_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
-        photo_reader: Callable[[bytes], Mapping[str, object]] | None = None,
+        photo_reader: Callable[..., Mapping[str, object]] | None = None,
         retained_projection: bool = False,
     ) -> None:
         self._config = self._validate_config(config)
@@ -623,16 +630,26 @@ class DistributorOperations:
     def analyze_photo(self, request: Mapping[str, object]) -> dict[str, object]:
         """Read one retained photo as advisory evidence without creating an event or stock write."""
 
-        if set(request) - {"attachment_id", "lot"} or "attachment_id" not in request:
-            raise ValueError("photo analysis requires attachment_id and optional lot")
+        allowed = {"attachment_id", "lot", "purpose", "supersedes_attachment_id"}
+        if set(request) - allowed or "attachment_id" not in request:
+            raise ValueError(
+                "photo analysis requires attachment_id and optional lot, purpose, "
+                "and supersedes_attachment_id"
+            )
         reader = self._photo_reader
         if reader is None:
             raise ValueError("operations photo analysis is not enabled")
         self._require_live_operations()
         attachment_id = _text(request.get("attachment_id"), "attachment_id")
+        purpose = self._photo_purpose(request.get("purpose"))
         requested_lot = (
             _text(request.get("lot"), "photo analysis lot")
             if request.get("lot") is not None
+            else None
+        )
+        supersedes_attachment_id = (
+            _text(request.get("supersedes_attachment_id"), "supersedes_attachment_id")
+            if request.get("supersedes_attachment_id") is not None
             else None
         )
         with self._lock:
@@ -654,13 +671,20 @@ class DistributorOperations:
                 if linked_lot is not None
                 else None
             )
-            lot_name = linked_lot["lot"] if linked_lot is not None else None
+            lot_name = _text(linked_lot["lot"], "linked photo lot") if linked_lot else None
+            self._validate_photo_supersession(
+                attachment_id,
+                supersedes_attachment_id,
+                lot_name,
+            )
             if source.get("source_status") != "CURRENT" or source_revision is None:
                 analysis = self._unavailable_photo_analysis(
                     digest=digest,
                     source_revision=None,
                     linked_lot=lot_name,
                     linked_quantity=linked_quantity,
+                    purpose=purpose,
+                    supersedes_attachment_id=supersedes_attachment_id,
                     message="Current ERP evidence is unavailable; photo analysis can be retried.",
                 )
                 self._store_photo_analysis(attachment_id, analysis)
@@ -671,21 +695,28 @@ class DistributorOperations:
                 source_revision=source_revision,
                 linked_lot=lot_name,
                 reader_model_id=reader_model_id,
+                purpose=purpose,
             )
             if cached is not None:
-                self._store_photo_analysis(attachment_id, cached)
+                self._store_photo_analysis(
+                    attachment_id,
+                    self._with_photo_supersession(cached, supersedes_attachment_id),
+                )
                 return self._projection(state, source)
             try:
-                # The reader receives only normalized pixels. Attachment IDs, filenames and
-                # operator-entered lot information are never prompt context.
-                result = reader(normalize_photo(image))
+                # The reader receives normalized pixels and the requested view purpose only.
+                # Attachment IDs, filenames and operator-entered lot information never reach it.
+                result = self._read_photo(reader, normalize_photo(image), purpose)
                 analysis = self._complete_photo_analysis(
                     result,
                     digest=digest,
                     source_revision=source_revision,
-                    linked_lot=lot_name,
+                    linked_lot=linked_lot,
                     linked_quantity=linked_quantity,
                     reader_model_id=reader_model_id,
+                    purpose=purpose,
+                    supersedes_attachment_id=supersedes_attachment_id,
+                    source=source,
                 )
             except Exception:
                 analysis = self._unavailable_photo_analysis(
@@ -693,6 +724,8 @@ class DistributorOperations:
                     source_revision=source_revision,
                     linked_lot=lot_name,
                     linked_quantity=linked_quantity,
+                    purpose=purpose,
+                    supersedes_attachment_id=supersedes_attachment_id,
                     message="Photo analysis was unavailable; retry the same attachment when ready.",
                 )
             self._store_photo_analysis(attachment_id, analysis)
@@ -1522,14 +1555,20 @@ class DistributorOperations:
         source_revision = self._source_revision(source)
         if source.get("source_status") != "CURRENT" or source_revision is None:
             return []
+        superseded = self._photo_supersession_index()
         rows = self._db.execute(
-            "SELECT digest, analysis_json FROM distributor_operation_attachments "
+            "SELECT attachment_id, digest, analysis_json FROM distributor_operation_attachments "
             "WHERE case_id=? AND analysis_json IS NOT NULL ORDER BY recorded_at, attachment_id",
             (self._config["case_id"],),
         ).fetchall()
         observations: list[dict[str, object]] = []
-        for digest, raw_analysis in rows:
-            if not isinstance(digest, str) or not isinstance(raw_analysis, str):
+        for attachment_id, digest, raw_analysis in rows:
+            if (
+                not isinstance(attachment_id, str)
+                or attachment_id in superseded
+                or not isinstance(digest, str)
+                or not isinstance(raw_analysis, str)
+            ):
                 continue
             try:
                 analysis = _decoded(raw_analysis, "photo analysis")
@@ -1537,22 +1576,29 @@ class DistributorOperations:
                 continue
             recommendation = analysis.get("recommendation")
             assessment = analysis.get("assessment")
+            checks = analysis.get("checks")
+            source_context = analysis.get("source_context")
             if (
                 analysis.get("status") != "COMPLETE"
                 or analysis.get("attachment_sha256") != digest
                 or analysis.get("source_revision") != source_revision
                 or not isinstance(recommendation, Mapping)
                 or not isinstance(assessment, Mapping)
+                or not isinstance(checks, Mapping)
+                or recommendation.get("identity_safe") is not True
             ):
                 continue
             observed_at = analysis.get("observed_at")
             code = recommendation.get("code")
             visible_condition = assessment.get("visible_condition")
-            visibility = assessment.get("visibility")
+            visibility = (
+                assessment.get("visibility")
+                or assessment.get("label_visibility")
+                or assessment.get("detail_visibility")
+            )
             if not (
                 isinstance(observed_at, str)
                 and isinstance(code, str)
-                and isinstance(visible_condition, str)
                 and isinstance(visibility, str)
             ):
                 continue
@@ -1564,13 +1610,16 @@ class DistributorOperations:
                     + sha256(
                         _encode(
                             {
+                                "attachment_id": attachment_id,
                                 "attachment_sha256": digest,
                                 "source_revision": source_revision,
                                 "linked_lot": linked_lot,
+                                "purpose": analysis.get("purpose", "overview"),
                             }
                         ).encode("utf-8")
                     ).hexdigest()[:24],
                     "attachment_sha256": digest,
+                    "attachment_id": attachment_id,
                     "source_revision": source_revision,
                     "observed_at": observed_at,
                     "linked_lot": linked_lot if isinstance(linked_lot, str) else None,
@@ -1578,10 +1627,18 @@ class DistributorOperations:
                         linkage_source if linkage_source == "OPERATOR_SELECTED" else None
                     ),
                     "linked_quantity": analysis.get("linked_quantity"),
+                    "purpose": analysis.get("purpose", "overview"),
                     "visibility": visibility,
-                    "visible_condition": visible_condition,
+                    "visible_condition": visible_condition
+                    if isinstance(visible_condition, str)
+                    else None,
+                    "assessment": _copy(assessment),
                     "recommendation_code": code,
                     "label_lot_conflict": recommendation.get("label_lot_conflict") is True,
+                    "checks": _copy(checks),
+                    "source_context": (
+                        _copy(source_context) if isinstance(source_context, Mapping) else {}
+                    ),
                     "authority": (
                         "Advisory photo observation only; current ERP lot status and usable "
                         "quantity remain the feasibility authority."
@@ -4159,6 +4216,7 @@ class DistributorOperations:
         )
         result["photo_analysis_enabled"] = self.photo_analysis_enabled
         self._add_photo_attachments(result, source)
+        result["photo_review_card"] = self._photo_review_card(source)
         proposal = self._current_proposal()
         if proposal is not None:
             result["prepared_proposal"] = {
@@ -4298,6 +4356,94 @@ class DistributorOperations:
             raise ValueError("photo analysis lot is not a current configured lot")
         return matches[0]
 
+    def _validate_photo_supersession(
+        self,
+        attachment_id: str,
+        supersedes_attachment_id: str | None,
+        linked_lot: str | None,
+    ) -> None:
+        """Keep one same-lot evidence chain; a replacement never merges photo views."""
+
+        if supersedes_attachment_id is None:
+            return
+        if supersedes_attachment_id == attachment_id:
+            raise ValueError("a photo attachment cannot supersede itself")
+        row = self._db.execute(
+            "SELECT analysis_json FROM distributor_operation_attachments "
+            "WHERE attachment_id=? AND case_id=?",
+            (supersedes_attachment_id, self._config["case_id"]),
+        ).fetchone()
+        if row is None:
+            raise ValueError("superseded photo attachment is unavailable for this case")
+        raw_analysis = row[0]
+        if not isinstance(raw_analysis, str):
+            raise ValueError("superseded photo must have a complete same-lot analysis")
+        try:
+            predecessor = _decoded(raw_analysis, "superseded photo analysis")
+        except RuntimeError as error:
+            raise ValueError("superseded photo analysis is malformed") from error
+        predecessor_lot = predecessor.get("linked_lot")
+        if (
+            predecessor.get("status") != "COMPLETE"
+            or not isinstance(predecessor_lot, str)
+            or predecessor_lot != linked_lot
+        ):
+            raise ValueError("superseding photo must use the same selected lot")
+        successor = self._photo_supersession_index().get(supersedes_attachment_id)
+        if successor is not None and successor != attachment_id:
+            raise ValueError("superseded photo already has a replacement attachment")
+        cursor = supersedes_attachment_id
+        seen: set[str] = set()
+        while True:
+            if cursor == attachment_id:
+                raise ValueError("photo supersession cannot create a cycle")
+            if cursor in seen:
+                raise ValueError("stored photo supersession chain is cyclic")
+            seen.add(cursor)
+            ancestor = self._db.execute(
+                "SELECT analysis_json FROM distributor_operation_attachments "
+                "WHERE attachment_id=? AND case_id=?",
+                (cursor, self._config["case_id"]),
+            ).fetchone()
+            if ancestor is None or not isinstance(ancestor[0], str):
+                break
+            try:
+                analysis = _decoded(ancestor[0], "photo supersession analysis")
+            except RuntimeError:
+                break
+            parent = analysis.get("supersedes_attachment_id")
+            if not isinstance(parent, str) or not parent:
+                break
+            cursor = parent
+
+    def _photo_supersession_index(self) -> dict[str, str]:
+        """Return only completed, identity-safe successors; history remains on attachments."""
+
+        rows = self._db.execute(
+            "SELECT attachment_id, analysis_json FROM distributor_operation_attachments "
+            "WHERE case_id=? AND analysis_json IS NOT NULL ORDER BY recorded_at, attachment_id",
+            (self._config["case_id"],),
+        ).fetchall()
+        result: dict[str, str] = {}
+        for attachment_id, raw_analysis in rows:
+            if not isinstance(attachment_id, str) or not isinstance(raw_analysis, str):
+                continue
+            try:
+                analysis = _decoded(raw_analysis, "photo supersession analysis")
+            except RuntimeError:
+                continue
+            recommendation = analysis.get("recommendation")
+            parent = analysis.get("supersedes_attachment_id")
+            if (
+                analysis.get("status") == "COMPLETE"
+                and isinstance(recommendation, Mapping)
+                and recommendation.get("identity_safe") is True
+                and isinstance(parent, str)
+                and parent
+            ):
+                result[parent] = attachment_id
+        return result
+
     @staticmethod
     def _safe_photo_value(value: object, *, mapping: bool = False) -> object:
         """Retain only JSON metadata from a reader result; malformed metadata is display-empty."""
@@ -4318,49 +4464,56 @@ class DistributorOperations:
         text = value.strip()
         return text if text and len(text) <= 256 else None
 
+    @staticmethod
+    def _photo_purpose(value: object) -> PhotoPurpose:
+        if value is None:
+            return "overview"
+        if isinstance(value, str) and value in {"overview", "label", "detail"}:
+            return cast(PhotoPurpose, value)
+        raise ValueError("photo purpose must be overview, label, or detail")
+
+    @staticmethod
+    def _reader_accepts_photo_purpose(reader: Callable[..., Mapping[str, object]]) -> bool:
+        try:
+            parameters = signature(reader).parameters.values()
+        except (TypeError, ValueError):
+            return False
+        return any(
+            parameter.name == "purpose" or parameter.kind is Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+
+    def _read_photo(
+        self, reader: Callable[..., Mapping[str, object]], image: bytes, purpose: PhotoPurpose
+    ) -> Mapping[str, object]:
+        if purpose == "overview":
+            return reader(image)
+        if not self._reader_accepts_photo_purpose(reader):
+            raise ValueError("configured photo reader does not support the selected photo purpose")
+        return reader(image, purpose=purpose)
+
     def _complete_photo_analysis(
         self,
         result: Mapping[str, object],
         *,
         digest: str,
         source_revision: str,
-        linked_lot: object,
+        linked_lot: Mapping[str, object] | None,
         linked_quantity: object,
         reader_model_id: str | None,
+        purpose: PhotoPurpose,
+        supersedes_attachment_id: str | None,
+        source: Mapping[str, object],
     ) -> dict[str, object]:
         if not isinstance(result, Mapping):
             raise ValueError("photo reader result is malformed")
-        assessment = PhotoAssessment.model_validate(result.get("assessment"))
-        image_label_lot = assessment.supplier_lot or None
-        selected_lot = _text(linked_lot, "linked photo lot") if linked_lot is not None else None
-        label_lot_conflict = (
-            selected_lot is not None
-            and image_label_lot is not None
-            and image_label_lot != selected_lot
-        )
-        if assessment.visibility != "clear":
-            code = "RETAKE"
-            message = (
-                "The receiving units are not fully visible; take the requested replacement photo."
-            )
-        elif assessment.visible_condition == "visible_damage":
-            code = "REQUIRE_INSPECTION"
-            message = (
-                "Visible damage requires an operator-confirmed inspection; "
-                "it is not a quality disposition."
-            )
-        elif assessment.visible_condition == "no_visible_damage":
-            code = "NO_VISIBLE_DAMAGE_NOT_QUALITY_CLEARANCE"
-            message = "No visible outer damage is not a quality release or stock disposition."
-        else:
-            code = "PHOTO_CONDITION_REQUIRES_REVIEW"
-            message = "The visible condition is unclear; review or take another photo."
-        if label_lot_conflict and assessment.visibility == "clear":
-            code = "REQUIRE_INSPECTION"
-            message = (
-                "The legible image label conflicts with the operator-selected lot; verify the "
-                "association before using this photo as advisory evidence."
-            )
+        returned_purpose = result.get("purpose")
+        if isinstance(returned_purpose, str) and returned_purpose != purpose:
+            raise ValueError("photo reader returned a different analysis purpose")
+        assessment = self._photo_assessment(result.get("assessment"), purpose)
+        selected_lot = _text(linked_lot["lot"], "linked photo lot") if linked_lot else None
+        checks = self._photo_identity_checks(purpose, assessment, linked_lot)
+        recommendation, next_action = self._photo_recommendation(purpose, assessment, checks)
         raw_latency = result.get("latency_ms")
         latency = (
             raw_latency
@@ -4373,7 +4526,10 @@ class DistributorOperations:
         return {
             "status": "COMPLETE",
             "_cache_reader_model_id": reader_model_id,
-            "assessment": assessment.model_dump(mode="json"),
+            "_cache_photo_purpose": purpose,
+            "purpose": purpose,
+            "assessment": assessment,
+            "checks": checks,
             "model": self._optional_photo_text(result.get("model")),
             "provider": self._optional_photo_text(result.get("provider")),
             "transport": self._optional_photo_text(result.get("transport")),
@@ -4386,14 +4542,401 @@ class DistributorOperations:
             "linked_lot": selected_lot,
             "linkage_source": "OPERATOR_SELECTED" if selected_lot is not None else None,
             "linked_quantity": linked_quantity,
-            "recommendation": {
-                "code": code,
+            "supersedes_attachment_id": supersedes_attachment_id,
+            "recommendation": recommendation,
+            "next_action": next_action,
+            "source_context": self._photo_source_context(source, linked_lot),
+        }
+
+    @staticmethod
+    def _photo_assessment(value: object, purpose: PhotoPurpose) -> dict[str, object]:
+        if purpose == "overview":
+            return PhotoAssessment.model_validate(value).model_dump(mode="json")
+        if purpose == "label":
+            return PhotoLabelAssessment.model_validate(value).model_dump(mode="json")
+        return PhotoDetailAssessment.model_validate(value).model_dump(mode="json")
+
+    def _photo_identity_checks(
+        self,
+        purpose: PhotoPurpose,
+        assessment: Mapping[str, object],
+        linked_lot: Mapping[str, object] | None,
+    ) -> dict[str, dict[str, object]]:
+        observed_item = (
+            self._optional_photo_text(assessment.get("item_code"))
+            if purpose in {"overview", "label"}
+            else None
+        )
+        observed_lot = (
+            self._optional_photo_text(assessment.get("supplier_lot"))
+            if purpose in {"overview", "label"}
+            else None
+        )
+        expected_item = (
+            self._optional_photo_text(linked_lot.get("item_code"))
+            if linked_lot is not None
+            else None
+        ) or _text(self._config["item_code"], "configured item_code")
+        if purpose == "detail":
+            return {
+                "item_code": self._photo_check(None, expected_item, applicable=False),
+                "lot": self._photo_check(None, None, applicable=False),
+            }
+        item_check = self._photo_check(observed_item, expected_item, applicable=True)
+        if linked_lot is None:
+            lot_check = self._photo_check(observed_lot, None, applicable=False)
+        else:
+            expected_lot = _text(linked_lot["lot"], "linked photo lot")
+            lot_check = self._photo_check(
+                observed_lot,
+                expected_lot,
+                applicable=True,
+                aliases=self._configured_lot_aliases(expected_lot),
+            )
+        return {"item_code": item_check, "lot": lot_check}
+
+    @staticmethod
+    def _photo_check(
+        observed: str | None,
+        expected: str | None,
+        *,
+        applicable: bool,
+        aliases: set[str] | None = None,
+    ) -> dict[str, object]:
+        if not applicable:
+            return {
+                "status": "NOT_APPLICABLE",
+                "observed": observed,
+                "expected": expected,
+                "requires_review": observed is not None,
+            }
+        if observed is None:
+            return {
+                "status": "UNKNOWN",
+                "observed": None,
+                "expected": expected,
+                "requires_review": True,
+            }
+        accepted = aliases or ({expected} if expected is not None else set())
+        if observed in accepted:
+            return {
+                "status": "MATCH",
+                "observed": observed,
+                "expected": expected,
+                "requires_review": False,
+                **({"matched_by": "CONFIGURED_ALIAS"} if observed != expected else {}),
+            }
+        return {
+            "status": "MISMATCH",
+            "observed": observed,
+            "expected": expected,
+            "requires_review": True,
+        }
+
+    def _configured_lot_aliases(self, lot: str) -> set[str]:
+        aliases = {lot}
+        for name in ("lots", "receipt_plans"):
+            rows = self._config.get(name)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, Mapping) or row.get("lot") != lot:
+                    continue
+                batch_no = row.get("batch_no")
+                if isinstance(batch_no, str) and batch_no.strip():
+                    aliases.add(batch_no.strip())
+        return aliases
+
+    def _photo_quality_policy(self) -> dict[str, object]:
+        policy = cast(Mapping[str, object], self._config["policy"])
+        criteria = policy.get("inspection_criteria")
+        return {
+            "inspection_required": policy["inspection_required"],
+            "inspection_criteria": _copy(criteria) if isinstance(criteria, Mapping) else {},
+            "synthetic_specification": (
+                "SYNTHETIC_CONFIG"
+                if self._config["synthetic_input"] is True
+                else "CONFIGURED_POLICY"
+            ),
+            "specification_source": (
+                "SYNTHETIC_CONFIG"
+                if self._config["synthetic_input"] is True
+                else "CONFIGURED_POLICY"
+            ),
+        }
+
+    def _photo_lot_context(
+        self, linked_lot: Mapping[str, object] | None
+    ) -> dict[str, object] | None:
+        if linked_lot is None:
+            return None
+        context: dict[str, object] = {
+            "lot": _text(linked_lot["lot"], "photo context lot"),
+            "item_code": self._optional_photo_text(linked_lot.get("item_code"))
+            or _text(self._config["item_code"], "configured item_code"),
+            "item_authority": (
+                "CURRENT_ERP_LOT"
+                if self._optional_photo_text(linked_lot.get("item_code")) is not None
+                else "CONFIGURED_CASE_SCOPE"
+            ),
+        }
+        for field in ("status", "received", "usable", "held", "expected_quantity"):
+            if field in linked_lot:
+                context[field] = _copy(linked_lot[field])
+        return context
+
+    @staticmethod
+    def _photo_case_quantities(source: Mapping[str, object]) -> dict[str, object]:
+        quantities = source.get("quantities")
+        if not isinstance(quantities, Mapping):
+            return {}
+        return {
+            field: _copy(quantities[field])
+            for field in ("received", "usable", "held", "allocated", "dispatched", "uom")
+            if field in quantities
+        }
+
+    @staticmethod
+    def _photo_affected_orders(source: Mapping[str, object]) -> list[dict[str, object]]:
+        allocations = source.get("allocations")
+        if not isinstance(allocations, list):
+            return []
+        fields = (
+            "customer_order",
+            "requested_quantity",
+            "allocated",
+            "backordered",
+            "dispatched",
+            "priority",
+            "promised_delivery_at",
+        )
+        result: list[dict[str, object]] = []
+        for row in allocations:
+            if not isinstance(row, Mapping):
+                continue
+            current = {field: _copy(row[field]) for field in fields if field in row}
+            try:
+                requested = _quantity(row.get("requested_quantity"), "affected order quantity")
+                allocated = _quantity(row.get("allocated", 0), "affected order allocation")
+                dispatched = _quantity(row.get("dispatched", 0), "affected order dispatch")
+            except ValueError:
+                pass
+            else:
+                remaining_requested = max(Decimal("0"), requested - dispatched)
+                current["still_fulfillable_quantity"] = _wire(min(allocated, remaining_requested))
+                current["still_fulfillable_authority"] = "CURRENT_ERP_ALLOCATION"
+            result.append(current)
+        return result
+
+    def _photo_source_context(
+        self, source: Mapping[str, object], linked_lot: Mapping[str, object] | None
+    ) -> dict[str, object]:
+        return {
+            "source_status": source.get("source_status"),
+            "source_revision": self._source_revision(source),
+            "selected_lot": self._photo_lot_context(linked_lot),
+            "quality_policy": self._photo_quality_policy(),
+            "affected_orders": self._photo_affected_orders(source),
+            "quantities": self._photo_case_quantities(source),
+        }
+
+    def _photo_recommendation(
+        self,
+        purpose: PhotoPurpose,
+        assessment: Mapping[str, object],
+        checks: Mapping[str, Mapping[str, object]],
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        item_check = checks["item_code"]
+        lot_check = checks["lot"]
+        identity_mismatch = any(
+            check.get("status") == "MISMATCH" for check in (item_check, lot_check)
+        )
+        identity_review_required = any(
+            check.get("requires_review") is True for check in (item_check, lot_check)
+        )
+        image_label_lot = self._optional_photo_text(assessment.get("supplier_lot"))
+        image_label_item = self._optional_photo_text(assessment.get("item_code"))
+        if identity_mismatch:
+            message = (
+                "The legible image identity conflicts with the selected current lot or item; "
+                "verify the association before using this photo as advisory evidence."
+            )
+            return (
+                {
+                    "code": "VERIFY_IDENTITY",
+                    "message": message,
+                    "image_label_lot": image_label_lot,
+                    "image_label_item": image_label_item,
+                    "label_lot_conflict": lot_check.get("status") == "MISMATCH",
+                    "identity_review_required": True,
+                    "identity_safe": False,
+                },
+                {"code": "VERIFY_IDENTITY", "message": message, "suggested_purpose": "label"},
+            )
+        if purpose == "label":
+            if assessment.get("label_visibility") != "legible":
+                message = "The label is not legible; take the requested label close-up."
+                return (
+                    {
+                        "code": "RETAKE_LABEL",
+                        "message": message,
+                        "image_label_lot": image_label_lot,
+                        "image_label_item": image_label_item,
+                        "label_lot_conflict": False,
+                        "identity_review_required": identity_review_required,
+                        "identity_safe": True,
+                    },
+                    {
+                        "code": "CAPTURE_LABEL",
+                        "message": self._optional_photo_text(assessment.get("next_photo"))
+                        or message,
+                        "suggested_purpose": "label",
+                    },
+                )
+            message = "Label observations need operator review before any inventory action."
+            return (
+                {
+                    "code": "REVIEW_PRODUCT_CHECK",
+                    "message": message,
+                    "image_label_lot": image_label_lot,
+                    "image_label_item": image_label_item,
+                    "label_lot_conflict": False,
+                    "identity_review_required": identity_review_required,
+                    "identity_safe": True,
+                },
+                {"code": "CAPTURE_DETAIL", "message": message, "suggested_purpose": "detail"},
+            )
+        if purpose == "detail":
+            if assessment.get("detail_visibility") != "clear":
+                message = "The requested exterior detail is unclear; take the requested close-up."
+                return (
+                    {
+                        "code": "RETAKE_DETAIL",
+                        "message": message,
+                        "image_label_lot": None,
+                        "image_label_item": None,
+                        "label_lot_conflict": False,
+                        "identity_review_required": False,
+                        "identity_safe": True,
+                    },
+                    {
+                        "code": "CAPTURE_DETAIL",
+                        "message": self._optional_photo_text(assessment.get("next_photo"))
+                        or message,
+                        "suggested_purpose": "detail",
+                    },
+                )
+            if assessment.get("visible_condition") == "visible_damage":
+                message = (
+                    "Visible exterior damage requires an operator-confirmed inspection; "
+                    "it is not a quality disposition."
+                )
+                return (
+                    {
+                        "code": "REQUIRE_INSPECTION",
+                        "message": message,
+                        "image_label_lot": None,
+                        "image_label_item": None,
+                        "label_lot_conflict": False,
+                        "identity_review_required": False,
+                        "identity_safe": True,
+                    },
+                    {"code": "OPERATOR_INSPECTION", "message": message},
+                )
+            if assessment.get("visible_condition") == "no_visible_damage":
+                message = (
+                    "No visible damage in this detail is not a quality release or "
+                    "stock disposition."
+                )
+                return (
+                    {
+                        "code": "NO_VISIBLE_DAMAGE_NOT_QUALITY_CLEARANCE",
+                        "message": message,
+                        "image_label_lot": None,
+                        "image_label_item": None,
+                        "label_lot_conflict": False,
+                        "identity_review_required": False,
+                        "identity_safe": True,
+                    },
+                    {"code": "REVIEW_PRODUCT_CHECK", "message": message},
+                )
+            message = "The visible exterior condition is unclear; review or take another close-up."
+            return (
+                {
+                    "code": "PHOTO_CONDITION_REQUIRES_REVIEW",
+                    "message": message,
+                    "image_label_lot": None,
+                    "image_label_item": None,
+                    "label_lot_conflict": False,
+                    "identity_review_required": False,
+                    "identity_safe": True,
+                },
+                {"code": "CAPTURE_DETAIL", "message": message, "suggested_purpose": "detail"},
+            )
+        if assessment.get("visibility") != "clear":
+            message = (
+                "The receiving units are not fully visible; take the requested replacement photo."
+            )
+            return (
+                {
+                    "code": "RETAKE",
+                    "message": message,
+                    "image_label_lot": image_label_lot,
+                    "image_label_item": image_label_item,
+                    "label_lot_conflict": False,
+                    "identity_review_required": identity_review_required,
+                    "identity_safe": True,
+                },
+                {
+                    "code": "CAPTURE_OVERVIEW",
+                    "message": self._optional_photo_text(assessment.get("next_photo")) or message,
+                    "suggested_purpose": "overview",
+                },
+            )
+        if assessment.get("visible_condition") == "visible_damage":
+            message = (
+                "Visible damage requires an operator-confirmed inspection; "
+                "it is not a quality disposition."
+            )
+            return (
+                {
+                    "code": "REQUIRE_INSPECTION",
+                    "message": message,
+                    "image_label_lot": image_label_lot,
+                    "image_label_item": image_label_item,
+                    "label_lot_conflict": False,
+                    "identity_review_required": identity_review_required,
+                    "identity_safe": True,
+                },
+                {"code": "CAPTURE_DETAIL", "message": message, "suggested_purpose": "detail"},
+            )
+        if assessment.get("visible_condition") == "no_visible_damage":
+            message = "No visible outer damage is not a quality release or stock disposition."
+            return (
+                {
+                    "code": "NO_VISIBLE_DAMAGE_NOT_QUALITY_CLEARANCE",
+                    "message": message,
+                    "image_label_lot": image_label_lot,
+                    "image_label_item": image_label_item,
+                    "label_lot_conflict": False,
+                    "identity_review_required": identity_review_required,
+                    "identity_safe": True,
+                },
+                {"code": "CAPTURE_LABEL", "message": message, "suggested_purpose": "label"},
+            )
+        message = "The visible condition is unclear; review or take another photo."
+        return (
+            {
+                "code": "PHOTO_CONDITION_REQUIRES_REVIEW",
                 "message": message,
                 "image_label_lot": image_label_lot,
-                "label_lot_conflict": label_lot_conflict,
-                "identity_review_required": label_lot_conflict,
+                "image_label_item": image_label_item,
+                "label_lot_conflict": False,
+                "identity_review_required": identity_review_required,
+                "identity_safe": True,
             },
-        }
+            {"code": "CAPTURE_DETAIL", "message": message, "suggested_purpose": "detail"},
+        )
 
     def _unavailable_photo_analysis(
         self,
@@ -4402,12 +4945,20 @@ class DistributorOperations:
         source_revision: str | None,
         linked_lot: object,
         linked_quantity: object,
+        purpose: PhotoPurpose,
+        supersedes_attachment_id: str | None,
         message: str,
     ) -> dict[str, object]:
         selected_lot = _text(linked_lot, "linked photo lot") if linked_lot is not None else None
+        checks = {
+            "item_code": self._photo_check(None, None, applicable=False),
+            "lot": self._photo_check(None, selected_lot, applicable=False),
+        }
         return {
             "status": "UNAVAILABLE",
+            "purpose": purpose,
             "assessment": None,
+            "checks": checks,
             "model": None,
             "provider": None,
             "transport": None,
@@ -4420,15 +4971,27 @@ class DistributorOperations:
             "linked_lot": selected_lot,
             "linkage_source": "OPERATOR_SELECTED" if selected_lot is not None else None,
             "linked_quantity": linked_quantity,
+            "supersedes_attachment_id": supersedes_attachment_id,
             "recommendation": {
                 "code": "ANALYSIS_UNAVAILABLE",
                 "message": message,
                 "image_label_lot": None,
+                "image_label_item": None,
                 "label_lot_conflict": False,
                 "identity_review_required": False,
+                "identity_safe": False,
             },
+            "next_action": {"code": "RETRY_ANALYSIS", "message": message},
             "retryable": True,
         }
+
+    @staticmethod
+    def _with_photo_supersession(
+        analysis: Mapping[str, object], supersedes_attachment_id: str | None
+    ) -> dict[str, object]:
+        result = cast(dict[str, object], _copy(analysis))
+        result["supersedes_attachment_id"] = supersedes_attachment_id
+        return result
 
     def _cached_photo_analysis(
         self,
@@ -4437,7 +5000,11 @@ class DistributorOperations:
         source_revision: str,
         linked_lot: object,
         reader_model_id: str | None,
+        purpose: PhotoPurpose,
     ) -> dict[str, object] | None:
+        # A callable without a stable model identifier cannot safely share a paid result.
+        if reader_model_id is None:
+            return None
         selected_lot = _text(linked_lot, "linked photo lot") if linked_lot is not None else None
         rows = self._db.execute(
             "SELECT analysis_json FROM distributor_operation_attachments "
@@ -4457,12 +5024,13 @@ class DistributorOperations:
                 and analysis.get("source_revision") == source_revision
                 and analysis.get("linked_lot") == selected_lot
                 and analysis.get("_cache_reader_model_id") == reader_model_id
+                and analysis.get("_cache_photo_purpose", "overview") == purpose
             ):
                 return analysis
         return None
 
     @staticmethod
-    def _photo_reader_model_id(reader: Callable[[bytes], Mapping[str, object]]) -> str | None:
+    def _photo_reader_model_id(reader: Callable[..., Mapping[str, object]]) -> str | None:
         """Use a configured reader model as part of the durable de-duplication key."""
 
         model_id = getattr(reader, "model_id", None)
@@ -4478,7 +5046,11 @@ class DistributorOperations:
             raise ValueError("photo attachment is unavailable for this case")
 
     def _attachment_metadata(
-        self, attachment_id: str, *, current_source_revision: str | None = None
+        self,
+        attachment_id: str,
+        *,
+        current_source_revision: str | None = None,
+        superseded_by_attachment_id: str | None = None,
     ) -> dict[str, object]:
         row = self._db.execute(
             "SELECT attachment_id, media_type, digest, proposal_id, event_id, recorded_at, "
@@ -4494,10 +5066,12 @@ class DistributorOperations:
         analysis = _decoded(raw_analysis, "photo analysis") if raw_analysis is not None else None
         if analysis is not None:
             analysis.pop("_cache_reader_model_id", None)
-            analysis["advisory_current"] = (
-                analysis.get("status") == "COMPLETE"
-                and current_source_revision is not None
-                and analysis.get("source_revision") == current_source_revision
+            analysis.pop("_cache_photo_purpose", None)
+            analysis["superseded_by_attachment_id"] = superseded_by_attachment_id
+            analysis["advisory_current"] = self._analysis_is_advisory_current(
+                analysis,
+                current_source_revision=current_source_revision,
+                superseded_by_attachment_id=superseded_by_attachment_id,
             )
         interpretation = (
             "NOT_ANALYZED"
@@ -4514,9 +5088,27 @@ class DistributorOperations:
             "event_id": event_id,
             "recorded_at": recorded_at,
             "source": "OPERATOR_ATTACHED_PHOTO",
+            "superseded_by_attachment_id": superseded_by_attachment_id,
             "interpretation": interpretation,
             "analysis": analysis,
         }
+
+    @staticmethod
+    def _analysis_is_advisory_current(
+        analysis: Mapping[str, object],
+        *,
+        current_source_revision: str | None,
+        superseded_by_attachment_id: str | None,
+    ) -> bool:
+        recommendation = analysis.get("recommendation")
+        return (
+            analysis.get("status") == "COMPLETE"
+            and current_source_revision is not None
+            and analysis.get("source_revision") == current_source_revision
+            and superseded_by_attachment_id is None
+            and isinstance(recommendation, Mapping)
+            and recommendation.get("identity_safe") is True
+        )
 
     def _add_photo_attachments(
         self, projection: dict[str, object], source: Mapping[str, object]
@@ -4527,12 +5119,96 @@ class DistributorOperations:
             "ORDER BY recorded_at, attachment_id",
             (self._config["case_id"],),
         ).fetchall()
+        successors = self._photo_supersession_index()
         projection["photo_attachments"] = [
             self._attachment_metadata(
-                cast(str, row[0]), current_source_revision=current_source_revision
+                cast(str, row[0]),
+                current_source_revision=current_source_revision,
+                superseded_by_attachment_id=successors.get(cast(str, row[0])),
             )
             for row in rows
         ]
+
+    def _photo_review_card(self, source: Mapping[str, object]) -> dict[str, object]:
+        """Expose source-derived context without making photos stock authority."""
+
+        current_source_revision = self._source_revision(source)
+        latest: tuple[str, Mapping[str, object]] | None = None
+        latest_key: tuple[str, str] | None = None
+        rows = self._db.execute(
+            "SELECT attachment_id, analysis_json FROM distributor_operation_attachments "
+            "WHERE case_id=? AND analysis_json IS NOT NULL ORDER BY recorded_at, attachment_id",
+            (self._config["case_id"],),
+        ).fetchall()
+        for attachment_id, raw_analysis in rows:
+            if not isinstance(attachment_id, str) or not isinstance(raw_analysis, str):
+                continue
+            try:
+                analysis = _decoded(raw_analysis, "photo review card analysis")
+            except RuntimeError:
+                continue
+            observed_at = analysis.get("observed_at")
+            key = (
+                (observed_at, attachment_id)
+                if isinstance(observed_at, str)
+                else ("", attachment_id)
+            )
+            if latest_key is None or key > latest_key:
+                latest = (attachment_id, analysis)
+                latest_key = key
+        attachment_id = latest[0] if latest is not None else None
+        analysis = latest[1] if latest is not None else None
+        linked_lot_name = (
+            analysis.get("linked_lot")
+            if isinstance(analysis, Mapping) and isinstance(analysis.get("linked_lot"), str)
+            else None
+        )
+        selected_lot = self._source_lot(source, linked_lot_name)
+        successors = self._photo_supersession_index()
+        advisory_current = (
+            self._analysis_is_advisory_current(
+                analysis,
+                current_source_revision=current_source_revision,
+                superseded_by_attachment_id=successors.get(attachment_id),
+            )
+            if isinstance(analysis, Mapping) and attachment_id is not None
+            else False
+        )
+        return {
+            "source_status": source.get("source_status"),
+            "source_revision": current_source_revision,
+            "analysis_context": {
+                "attachment_id": attachment_id,
+                "purpose": analysis.get("purpose", "overview") if analysis else None,
+                "linked_lot": linked_lot_name,
+                "linkage_source": analysis.get("linkage_source") if analysis else None,
+                "analysis_source_revision": analysis.get("source_revision") if analysis else None,
+                "advisory_current": advisory_current,
+            },
+            "configured_item": {
+                "item_code": self._config["item_code"],
+                "authority": "CONFIGURED_CASE_SCOPE",
+            },
+            "selected_lot": self._photo_lot_context(selected_lot),
+            "quality_policy": self._photo_quality_policy(),
+            "affected_orders": self._photo_affected_orders(source),
+            "quantities": self._photo_case_quantities(source),
+            "current_observations": self._current_photo_observations(source),
+        }
+
+    @staticmethod
+    def _source_lot(
+        source: Mapping[str, object], lot_name: str | None
+    ) -> Mapping[str, object] | None:
+        if lot_name is None:
+            return None
+        lots = source.get("lots")
+        matches = (
+            [row for row in lots if isinstance(row, Mapping) and row.get("lot") == lot_name]
+            if isinstance(lots, list)
+            else []
+        )
+        return matches[0] if len(matches) == 1 else None
 
     def _require_unbound_attachment(self, attachment_id: str) -> None:
         row = self._db.execute(

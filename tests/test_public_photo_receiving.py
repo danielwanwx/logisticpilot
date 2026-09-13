@@ -226,3 +226,69 @@ def test_blind_framing_gate_runs_before_count_and_combines_usage(
     assert [stage["stage"] for stage in actual["stages"]] == (
         ["visibility"] if visibility == "cropped" else ["visibility", "count"]
     )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "schema_name", "payload"),
+    [
+        (
+            "label",
+            "PhotoLabelAssessment",
+            {
+                "label_visibility": "legible",
+                "item_code": "M20-COMPONENT-NOS",
+                "supplier_lot": "LOT-B5",
+                "label_declared_quantity": 5,
+                "observations": ["The printed lot is legible."],
+                "next_photo": "",
+            },
+        ),
+        (
+            "detail",
+            "PhotoDetailAssessment",
+            {
+                "detail_visibility": "clear",
+                "visible_condition": "visible_damage",
+                "issues": ["A fracture is visible."],
+                "next_photo": "",
+            },
+        ),
+    ],
+)
+def test_focused_photo_purpose_skips_whole_object_framing(
+    monkeypatch: pytest.MonkeyPatch,
+    purpose: str,
+    schema_name: str,
+    payload: dict[str, object],
+) -> None:
+    calls: list[str] = []
+
+    class FakeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            self.schema = kwargs["structured_output_model"]
+            assert "LOT-B5" not in kwargs["system_prompt"]
+
+        async def invoke_async(self, prompt: Any, **kwargs: Any) -> Any:
+            calls.append(self.schema.__name__)
+            assert any("image" in block for block in prompt)
+            assert "p01" not in str(prompt) and "visible_count" not in str(prompt)
+            return SimpleNamespace(
+                structured_output=self.schema.model_validate(payload),
+                metrics=SimpleNamespace(
+                    accumulated_usage={"inputTokens": 10, "outputTokens": 5, "totalTokens": 15}
+                ),
+            )
+
+    monkeypatch.setattr("strands.Agent", FakeAgent)
+    monkeypatch.setattr("strands.models.BedrockModel", lambda **_: object())
+    monkeypatch.setattr("boto3.Session", lambda **_: object())
+    settings = Settings.from_env({"MISSING20_AGENT_PROVIDER": "bedrock"})
+    actual = StrandsPhotoReader(settings)(b"test-double-image", purpose=purpose)  # type: ignore[arg-type]
+
+    assert calls == [schema_name]
+    assert actual["purpose"] == purpose
+    assert "countable" not in actual["assessment"]
+    if purpose == "label":
+        assert "visible_condition" not in actual["assessment"]
+    else:
+        assert actual["assessment"]["visible_condition"] == "visible_damage"

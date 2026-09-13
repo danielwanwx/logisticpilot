@@ -348,6 +348,45 @@ def _photo_reader_result(
     }
 
 
+def _focused_photo_reader_result(
+    purpose: str,
+    *,
+    item_code: str = "",
+    lot: str = "",
+    visible_condition: str = "visible_damage",
+    visibility: str = "clear",
+) -> dict[str, object]:
+    assessment: dict[str, object]
+    if purpose == "label":
+        assessment = {
+            "label_visibility": visibility,
+            "item_code": item_code,
+            "supplier_lot": lot,
+            "label_declared_quantity": None,
+            "observations": ["The printed lot is legible."] if visibility == "legible" else [],
+            "next_photo": "Retake the label square-on." if visibility != "legible" else "",
+        }
+    elif purpose == "detail":
+        assessment = {
+            "detail_visibility": visibility,
+            "visible_condition": visible_condition,
+            "issues": ["A fracture is visible."] if visible_condition == "visible_damage" else [],
+            "next_photo": "Retake the detail in focus." if visibility != "clear" else "",
+        }
+    else:  # pragma: no cover - helpers only support the new focused modes
+        raise AssertionError(f"unexpected focused purpose {purpose}")
+    return {
+        "purpose": purpose,
+        "assessment": assessment,
+        "model": "offline-photo-reader",
+        "provider": "bedrock",
+        "transport": "strands_multimodal",
+        "stages": [{"stage": purpose}],
+        "usage": {"outputTokens": 12},
+        "latency_ms": 4,
+    }
+
+
 def _event(event_id: str, event_type: str, **fields: object) -> dict[str, object]:
     return {
         "event_id": event_id,
@@ -2142,13 +2181,19 @@ def test_proposal_rejects_stale_case_and_manual_photo_stays_unanalyzed(tmp_path:
 
 
 def test_photo_analysis_is_advisory_cached_and_keeps_operator_lot_scope(tmp_path: Path) -> None:
+    class Reader:
+        model_id = "test-advisory-photo-reader"
+
+        def __init__(self) -> None:
+            self.calls: list[bytes] = []
+
+        def __call__(self, image: bytes) -> Mapping[str, object]:
+            self.calls.append(image)
+            return _photo_reader_result(lot="LOT-C")
+
     config = _component_config()
     bridge = _Bridge(config)
-    reader_calls: list[bytes] = []
-
-    def reader(image: bytes) -> Mapping[str, object]:
-        reader_calls.append(image)
-        return _photo_reader_result(lot="LOT-C")
+    reader = Reader()
 
     service = DistributorOperations(
         tmp_path / "photo-analysis.sqlite3", config, bridge, photo_reader=reader
@@ -2182,11 +2227,11 @@ def test_photo_analysis_is_advisory_cached_and_keeps_operator_lot_scope(tmp_path
     assert analysis["linked_lot"] == "LOT-B"
     assert analysis["linkage_source"] == "OPERATOR_SELECTED"
     assert analysis["linked_quantity"] == 18
-    assert analysis["advisory_current"] is True
-    assert recommendation["code"] == "REQUIRE_INSPECTION"
+    assert analysis["advisory_current"] is False
+    assert recommendation["code"] == "VERIFY_IDENTITY"
     assert recommendation["image_label_lot"] == "LOT-C"
     assert recommendation["label_lot_conflict"] is True
-    assert len(reader_calls) == 1
+    assert len(reader.calls) == 1
     assert bridge.calls == calls_before_analysis
     assert service.projection()["events"] == events_before_analysis
 
@@ -2200,7 +2245,7 @@ def test_photo_analysis_is_advisory_cached_and_keeps_operator_lot_scope(tmp_path
         for row in cast(list[Mapping[str, object]], duplicate["photo_attachments"])
         if row["attachment_id"] == "damaged-carton-b"
     )
-    assert len(reader_calls) == 1
+    assert len(reader.calls) == 1
     assert (
         cast(Mapping[str, object], duplicate_photo["analysis"])["attachment_sha256"]
         == photo["digest"]
@@ -2267,6 +2312,237 @@ def test_photo_analysis_cache_is_bound_to_configured_reader_model(tmp_path: Path
     assert opus.calls == 1
     assert bridge.calls == []
 
+    class NamelessReader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, _image: bytes) -> Mapping[str, object]:
+            self.calls += 1
+            return _photo_reader_result(model=f"nameless-reader-{self.calls}")
+
+    nameless = NamelessReader()
+    nameless_service = DistributorOperations(
+        tmp_path / "photo-nameless-reader.sqlite3", config, bridge, photo_reader=nameless
+    )
+    nameless_service.attach_photo(
+        {"attachment_id": "nameless-a", "media_type": "image/png", "image": image}
+    )
+    nameless_service.attach_photo(
+        {"attachment_id": "nameless-b", "media_type": "image/png", "image": image}
+    )
+    nameless_service.analyze_photo({"attachment_id": "nameless-a", "lot": "LOT-B"})
+    nameless_result = nameless_service.analyze_photo(
+        {"attachment_id": "nameless-b", "lot": "LOT-B"}
+    )
+    nameless_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], nameless_result["photo_attachments"])
+        if row["attachment_id"] == "nameless-b"
+    )
+    assert nameless.calls == 2
+    assert cast(Mapping[str, object], nameless_photo["analysis"])["model"] == "nameless-reader-2"
+
+
+def test_photo_purposes_preserve_scoped_history_and_never_write_inventory(tmp_path: Path) -> None:
+    class PurposeReader:
+        model_id = "offline-purpose-reader"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def __call__(self, _image: bytes, *, purpose: str = "overview") -> Mapping[str, object]:
+            self.calls.append(purpose)
+            if purpose == "overview":
+                return _photo_reader_result(visibility="cropped")
+            if purpose == "label":
+                return _focused_photo_reader_result(
+                    "label",
+                    item_code="M20-COMPONENT-NOS",
+                    lot="LOT-B",
+                    visibility="legible",
+                )
+            return _focused_photo_reader_result("detail", visible_condition="visible_damage")
+
+    config = _component_config()
+    bridge = _Bridge(config)
+    reader = PurposeReader()
+    service = DistributorOperations(
+        tmp_path / "photo-purpose.sqlite3", config, bridge, photo_reader=reader
+    )
+    bridge.state_provider = service._latest_state
+    service.record_event(_arrival("arrival-b", lot="LOT-B", cartons=2, observed=18))
+    calls_before = list(bridge.calls)
+
+    overview_image = base64.b64encode(_photo_png(color=(170, 20, 20))).decode("ascii")
+    label_image = base64.b64encode(_photo_png(color=(20, 170, 20))).decode("ascii")
+    detail_image = base64.b64encode(_photo_png(color=(20, 20, 170))).decode("ascii")
+    for attachment_id, image in (
+        ("overview-cropped", overview_image),
+        ("label-match", label_image),
+        ("detail-damage", detail_image),
+    ):
+        service.attach_photo(
+            {"attachment_id": attachment_id, "media_type": "image/png", "image": image}
+        )
+
+    overview = service.analyze_photo({"attachment_id": "overview-cropped", "lot": "LOT-B"})
+    overview_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], overview["photo_attachments"])
+        if row["attachment_id"] == "overview-cropped"
+    )
+    overview_analysis = cast(Mapping[str, object], overview_photo["analysis"])
+    assert overview_analysis["purpose"] == "overview"
+    assert cast(Mapping[str, object], overview_analysis["recommendation"])["code"] == "RETAKE"
+
+    label = service.analyze_photo(
+        {
+            "attachment_id": "label-match",
+            "lot": "LOT-B",
+            "purpose": "label",
+            "supersedes_attachment_id": "overview-cropped",
+        }
+    )
+    label_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], label["photo_attachments"])
+        if row["attachment_id"] == "label-match"
+    )
+    label_analysis = cast(Mapping[str, object], label_photo["analysis"])
+    assert label_analysis["purpose"] == "label"
+    assert "countable" not in cast(Mapping[str, object], label_analysis["assessment"])
+    assert "visible_condition" not in cast(Mapping[str, object], label_analysis["assessment"])
+    assert cast(Mapping[str, object], label_analysis["checks"])["item_code"]["status"] == "MATCH"
+    assert cast(Mapping[str, object], label_analysis["checks"])["lot"]["status"] == "MATCH"
+    assert cast(Mapping[str, object], label_analysis["recommendation"])["code"] == (
+        "REVIEW_PRODUCT_CHECK"
+    )
+    prior = next(
+        row
+        for row in cast(list[Mapping[str, object]], label["photo_attachments"])
+        if row["attachment_id"] == "overview-cropped"
+    )
+    assert prior["superseded_by_attachment_id"] == "label-match"
+
+    detail = service.analyze_photo(
+        {
+            "attachment_id": "detail-damage",
+            "lot": "LOT-B",
+            "purpose": "detail",
+            "supersedes_attachment_id": "label-match",
+        }
+    )
+    detail_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], detail["photo_attachments"])
+        if row["attachment_id"] == "detail-damage"
+    )
+    detail_analysis = cast(Mapping[str, object], detail_photo["analysis"])
+    assert detail_analysis["purpose"] == "detail"
+    assert "countable" not in cast(Mapping[str, object], detail_analysis["assessment"])
+    assert cast(Mapping[str, object], detail_analysis["recommendation"])["code"] == (
+        "REQUIRE_INSPECTION"
+    )
+    card = cast(Mapping[str, object], detail["photo_review_card"])
+    context = cast(Mapping[str, object], card["analysis_context"])
+    assert context["attachment_id"] == "detail-damage"
+    assert context["linked_lot"] == "LOT-B"
+    assert cast(Mapping[str, object], card["selected_lot"])["lot"] == "LOT-B"
+    observations = cast(list[Mapping[str, object]], card["current_observations"])
+    assert [row["attachment_id"] for row in observations] == ["detail-damage"]
+    assert cast(Mapping[str, object], observations[0]["assessment"])["issues"] == [
+        "A fracture is visible."
+    ]
+
+    with pytest.raises(ValueError, match="cycle"):
+        service.analyze_photo(
+            {
+                "attachment_id": "overview-cropped",
+                "lot": "LOT-B",
+                "supersedes_attachment_id": "detail-damage",
+            }
+        )
+    with pytest.raises(ValueError, match="same selected lot"):
+        service.analyze_photo(
+            {
+                "attachment_id": "overview-cropped",
+                "lot": "LOT-A",
+                "supersedes_attachment_id": "detail-damage",
+            }
+        )
+    assert reader.calls == ["overview", "label", "detail"]
+    assert bridge.calls == calls_before
+
+
+def test_photo_cache_is_scoped_by_purpose_and_identity_mismatch_is_not_advisory(
+    tmp_path: Path,
+) -> None:
+    class PurposeReader:
+        model_id = "offline-purpose-reader"
+
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def __call__(self, _image: bytes, *, purpose: str = "overview") -> Mapping[str, object]:
+            self.calls.append(purpose)
+            if purpose == "label":
+                return _focused_photo_reader_result(
+                    "label",
+                    item_code="M20-COMPONENT-NOS",
+                    lot="LOT-B",
+                    visibility="legible",
+                )
+            return _photo_reader_result(visible_condition="no_visible_damage")
+
+    config = _component_config()
+    bridge = _Bridge(config)
+    reader = PurposeReader()
+    service = DistributorOperations(
+        tmp_path / "photo-purpose-cache.sqlite3", config, bridge, photo_reader=reader
+    )
+    bridge.state_provider = service._latest_state
+    encoded = base64.b64encode(_photo_png(color=(170, 20, 20))).decode("ascii")
+    for attachment_id in ("same-label-a", "same-label-b", "same-overview-a"):
+        service.attach_photo(
+            {"attachment_id": attachment_id, "media_type": "image/png", "image": encoded}
+        )
+    service.analyze_photo({"attachment_id": "same-label-a", "lot": "LOT-B", "purpose": "label"})
+    service.analyze_photo({"attachment_id": "same-label-b", "lot": "LOT-B", "purpose": "label"})
+    service.analyze_photo({"attachment_id": "same-overview-a", "lot": "LOT-B"})
+    assert reader.calls == ["label", "overview"]
+
+    service.attach_photo(
+        {
+            "attachment_id": "wrong-label",
+            "media_type": "image/png",
+            "image": base64.b64encode(_photo_png(color=(20, 20, 170))).decode("ascii"),
+        }
+    )
+    service._photo_reader = lambda _image, *, purpose: _focused_photo_reader_result(
+        purpose,
+        item_code="WRONG-SKU",
+        lot="LOT-X9",
+        visibility="legible",
+    )
+    mismatch = service.analyze_photo(
+        {"attachment_id": "wrong-label", "lot": "LOT-B", "purpose": "label"}
+    )
+    mismatch_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], mismatch["photo_attachments"])
+        if row["attachment_id"] == "wrong-label"
+    )
+    mismatch_analysis = cast(Mapping[str, object], mismatch_photo["analysis"])
+    checks = cast(Mapping[str, Mapping[str, object]], mismatch_analysis["checks"])
+    assert checks["item_code"]["status"] == checks["lot"]["status"] == "MISMATCH"
+    assert cast(Mapping[str, object], mismatch_analysis["recommendation"])["code"] == (
+        "VERIFY_IDENTITY"
+    )
+    assert mismatch_analysis["advisory_current"] is False
+    card = cast(Mapping[str, object], mismatch["photo_review_card"])
+    assert all(row["attachment_id"] != "wrong-label" for row in card["current_observations"])
+    assert bridge.calls == []
+
 
 def test_photo_analysis_retake_unavailable_and_invalid_lot_are_safe(tmp_path: Path) -> None:
     config = _component_config()
@@ -2322,7 +2598,7 @@ def test_photo_analysis_retake_unavailable_and_invalid_lot_are_safe(tmp_path: Pa
         Mapping[str, object],
         cast(Mapping[str, object], conflict_photo["analysis"])["recommendation"],
     )
-    assert conflict_recommendation["code"] == "REQUIRE_INSPECTION"
+    assert conflict_recommendation["code"] == "VERIFY_IDENTITY"
     assert conflict_recommendation["identity_review_required"] is True
 
     malformed_calls = 0
