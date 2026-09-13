@@ -35,3 +35,37 @@ Retain the stopped Nova results. The next candidate will use the already authori
 Before any Opus experiment call, freeze its model, price and per-workflow allowance separately. Anthropic's May 27, 2026 price list specifies USD 5.50 per million input tokens and USD 27.50 per million output tokens for Opus 4.6 on Bedrock Geo Cross-Region, which matches the `us.` profile. The original USD 3 cumulative experiment ceiling and ledger remain in force. These are list-price token estimates, not an account invoice. [Anthropic price list, page 5](https://www-cdn.anthropic.com/files/4zrzovbb/website/3684c2faafb97418665782cea0001f439f74b1d2.pdf)
 
 The original 32-run held-out plan has not started. If the new candidate cannot finish its preregistered checks within the remaining allowance, report incomplete evidence and do not promote the Graph. Do not invent missing runs or label development results as held-out results.
+
+## V8 checkpoint appendix
+
+The two v8 development workflows in the same private run log both failed. No held-out
+case was authored or run, and these results establish neither accuracy nor a
+multi-agent gain. Further model calls stop for this delivery checkpoint pending a
+design review. This is not a claim that the protocol's same-mechanism,
+two-occurrence stop condition fired: the single and Graph workflows stopped at
+different output-contract boundaries.
+
+The single investigator made four provider requests, recorded 11,955 input and 1,120
+output tokens, and incurred a USD 0.0965525 charge. It retrieved both `RCV-D2` and
+`ORD-D2`, then reached native structured output. Its typed citations consistently
+used paths rooted at `/fields/...`, including
+`/fields/received_quantity/value`. The reader returns source records with a visible
+`fields` wrapper, while its validator resolves citation paths relative to
+`record.fields`; the model-visible citation schema supplies a JSON-pointer pattern
+but does not define that relative root. The resulting path error is therefore a
+source-representation/validator contract ambiguity, not evidence that the model
+cited an unreturned record or that a business decision was correct.
+
+The fixed Graph recorded six provider requests, 18,197 input tokens, and 1,697 output
+tokens; its conservative charge is USD 0.1467510. The receiving specialist returned
+`RCV-D2` after scoped reads but exhausted its three-request allocation without native
+structured output, so the coordinator made zero requests. The fulfillment stage's
+interrupted fifth attempt is retained as `unknown_usage:fulfillment:5`; its 1,024-token
+reservation is included in the USD 0.1467510 charge and is not wholly reported provider
+usage. The private trace and all failed records remain preserved outside Git.
+
+V8's combined conservative charge is USD 0.2433035. Together with the retained Nova
+development charge of USD 0.0461952, the unchanged durable ledger records USD
+0.2894987 against the USD 3 ceiling. A later design review should decide how to make
+the scalar source-citation pointer distinct from the typed answer quantity contract,
+and how to enforce specialist native structured output within the existing budgets.
