@@ -1476,6 +1476,10 @@
   let preparingEconomic = false;
   let selectedPhoto = null;
   let photoPreviewUrl = "";
+  let selectedPhotoAttachmentId = "";
+  let selectedPhotoLot = "";
+  let photoAnalysisPending = false;
+  let photoAnalysisFeedback = { message: "", tone: "" };
   let evidenceDrawerTrigger = null;
 
   function setText(id, value) {
@@ -3115,7 +3119,7 @@
   }
   function updateEventButton() {
     const button = $("ops-process-event");
-    if (button) button.disabled = processingEvent || !projection?.available || !freshActionsAllowed(projection) || !selectedTemplate || !sourceState?.hidden;
+    if (button) button.disabled = processingEvent || photoAnalysisPending || !projection?.available || !freshActionsAllowed(projection) || !selectedTemplate || !sourceState?.hidden;
   }
   function syncFreshEventControls(next = projection) {
     const form = $("ops-event-form");
@@ -3207,9 +3211,319 @@
     return Array.isArray(next?.photo_attachments) ? next.photo_attachments.filter(isRecord) : [];
   }
 
+  function photoAnalysisEnabled(next) {
+    return next?.photo_analysis_enabled === true;
+  }
+
+  function photoLotIdentifier(lot) {
+    return firstText(lot, ["lot", "lot_id", "name", "id"]);
+  }
+
+  function photoLotQuantity(lot) {
+    return numberFromKeys(lot, ["received", "received_quantity"]);
+  }
+
+  function photoAnalysisFor(next, attachmentId) {
+    if (!attachmentId) return null;
+    const photo = photoAttachmentList(next).find((item) => text(item.attachment_id) === text(attachmentId));
+    return isRecord(photo?.analysis) ? photo.analysis : null;
+  }
+
+  function photoAnalysisStatus(analysis) {
+    return text(analysis?.status).toUpperCase();
+  }
+
+  function photoConditionLabel(value) {
+    const condition = text(value).toLowerCase();
+    if (condition === "visible_damage") return "visible damage flagged";
+    if (condition === "unclear") return "condition unclear";
+    if (condition === "no_visible_damage") return "no visible damage observed";
+    return condition ? pretty(condition) : "condition unavailable";
+  }
+
+  function photoVisibilityLabel(value) {
+    const visibility = text(value).toLowerCase();
+    if (visibility === "clear") return "clear view";
+    if (visibility === "occluded") return "occluded view";
+    if (visibility === "cropped") return "cropped view";
+    if (visibility === "no_goods") return "goods not visible";
+    if (visibility === "unclear") return "view unclear";
+    return visibility ? pretty(visibility) : "visibility unavailable";
+  }
+
+  function photoAnalysisObservation(analysis) {
+    const assessment = isRecord(analysis?.assessment) ? analysis.assessment : {};
+    const issues = Array.isArray(assessment.issues)
+      ? assessment.issues.map((item) => text(item)).filter(Boolean).slice(0, 3)
+      : [];
+    const labels = [
+      firstText(assessment, ["item_code"]) ? `Photo label item ${firstText(assessment, ["item_code"])}` : "",
+      firstText(assessment, ["supplier_lot"]) ? `Photo label lot ${firstText(assessment, ["supplier_lot"])}` : "",
+    ].filter(Boolean);
+    const parts = [
+      firstText(assessment, ["visible_condition"]) ? `Visible condition: ${photoConditionLabel(assessment.visible_condition)}` : "",
+      firstText(assessment, ["visibility"]) ? `Visibility: ${photoVisibilityLabel(assessment.visibility)}` : "",
+      issues.length ? `Observed issue: ${issues.join("; ")}` : "",
+      ...labels,
+    ].filter(Boolean);
+    return parts.join(" · ") || "No visible observation was returned by the source.";
+  }
+
+  function photoRecommendation(analysis) {
+    const recommendation = isRecord(analysis?.recommendation) ? analysis.recommendation : {};
+    const code = firstText(recommendation, ["code"]).toUpperCase();
+    const fallback = {
+      REQUIRE_INSPECTION: "Inspection recommended before release.",
+      RETAKE: "Retake the photo with the complete receiving unit visible.",
+      NO_VISIBLE_DAMAGE_NOT_QUALITY_CLEARANCE: "No visible damage observed; this is not quality clearance.",
+      ANALYSIS_UNAVAILABLE: "Photo analysis is unavailable; retry or use manual inspection.",
+    };
+    return {
+      code,
+      message: firstText(recommendation, ["message"]) || fallback[code] || "Recommendation unavailable from the source.",
+      imageLabelLot: firstText(recommendation, ["image_label_lot"]),
+      labelLotConflict: recommendation.label_lot_conflict === true,
+    };
+  }
+
+  function photoModelValue(value) {
+    if (typeof value === "string") return text(value);
+    return firstText(value, ["model_id", "model", "provider", "name"]);
+  }
+
+  function photoUsageText(value) {
+    if (!isRecord(value)) return "";
+    const input = numberFromKeys(value, ["input_tokens", "inputTokens", "prompt_tokens"]);
+    const output = numberFromKeys(value, ["output_tokens", "outputTokens", "completion_tokens"]);
+    const total = numberFromKeys(value, ["total_tokens", "totalTokens"]);
+    return [
+      finite(input) ? `input ${formatNumber(input)}` : "",
+      finite(output) ? `output ${formatNumber(output)}` : "",
+      finite(total) ? `total ${formatNumber(total)}` : "",
+    ].filter(Boolean).join(", ");
+  }
+
+  function photoAnalysisProvenance(analysis) {
+    const model = photoModelValue(analysis?.model);
+    const provider = photoModelValue(analysis?.provider);
+    const transport = firstText(analysis, ["transport"]);
+    const latency = numberFrom(analysis?.latency_ms);
+    const observedAt = firstText(analysis, ["observed_at"]);
+    const sourceRevision = firstText(analysis, ["source_revision"]);
+    const usage = photoUsageText(analysis?.usage);
+    return [
+      model ? `Model ${model}` : "",
+      provider ? `Provider ${provider}` : "",
+      transport ? `Transport ${transport}` : "",
+      finite(latency) ? `Latency ${formatNumber(latency)} ms` : "",
+      observedAt ? `Observed ${formatDate(observedAt)}` : "",
+      sourceRevision ? `ERP source revision ${sourceRevision}` : "",
+      usage ? `Usage ${usage}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function photoLinkedQuantityText(analysis, next) {
+    const quantityValue = numberFrom(analysis?.linked_quantity);
+    const unit = text(next?.quantities?.uom) || "units";
+    return finite(quantityValue) ? `${formatNumber(quantityValue)} ${unit}` : "ERP quantity unavailable from the source.";
+  }
+
+  function renderPhotoAnalysisStages(parent, analysis) {
+    if (!Array.isArray(analysis?.stages) || !analysis.stages.length) return;
+    const details = document.createElement("details"); details.className = "ops-photo-analysis-stages";
+    const summary = document.createElement("summary"); summary.textContent = "View model stages"; details.append(summary);
+    const list = document.createElement("ul");
+    analysis.stages.filter(isRecord).forEach((stage) => {
+      const item = document.createElement("li");
+      const stageName = firstText(stage, ["stage"]) || "Model stage";
+      const latency = numberFrom(stage.latency_ms);
+      const usage = photoUsageText(stage.usage);
+      item.textContent = [pretty(stageName), finite(latency) ? `${formatNumber(latency)} ms` : "", usage ? `Usage ${usage}` : ""].filter(Boolean).join(" · ");
+      list.append(item);
+    });
+    if (list.childNodes.length) details.append(list);
+    parent.append(details);
+  }
+
+  function renderPhotoAnalysisEvidence(parent, analysis) {
+    const provenance = photoAnalysisProvenance(analysis);
+    const hasStages = Array.isArray(analysis?.stages) && analysis.stages.length > 0;
+    if (!provenance && !hasStages) return;
+    const details = document.createElement("details"); details.className = "ops-photo-analysis-evidence";
+    const summary = document.createElement("summary"); summary.textContent = "View source and model evidence"; details.append(summary);
+    if (provenance) {
+      const provenanceNode = document.createElement("p"); provenanceNode.className = "ops-photo-analysis-provenance";
+      provenanceNode.textContent = provenance; details.append(provenanceNode);
+    }
+    if (hasStages) {
+      const stages = document.createElement("div");
+      renderPhotoAnalysisStages(stages, analysis);
+      if (stages.firstElementChild) details.append(stages.firstElementChild);
+    }
+    parent.append(details);
+  }
+
+  function renderPhotoAnalysis(parent, photo, next) {
+    const analysis = isRecord(photo?.analysis) ? photo.analysis : null;
+    const section = document.createElement("section"); section.className = "ops-photo-analysis";
+    if (!analysis) {
+      const detail = document.createElement("p"); detail.className = "ops-photo-analysis-note";
+      detail.textContent = photoAnalysisEnabled(next)
+        ? "Not analyzed yet. Choose this photo's ERP lot in Photo intake, then analyze it."
+        : "Photo analysis is not configured for this case; this remains manual evidence only.";
+      section.append(detail); parent.append(section); return section;
+    }
+    const status = photoAnalysisStatus(analysis);
+    const recommendation = photoRecommendation(analysis);
+    const assessment = isRecord(analysis.assessment) ? analysis.assessment : {};
+    const condition = text(assessment.visible_condition).toLowerCase();
+    if (condition === "visible_damage" || recommendation.code === "REQUIRE_INSPECTION") section.classList.add("is-damage");
+    if (!recommendation.labelLotConflict && (condition === "no_visible_damage" || recommendation.code === "NO_VISIBLE_DAMAGE_NOT_QUALITY_CLEARANCE")) section.classList.add("is-clear");
+    const historical = status === "COMPLETE" && analysis.advisory_current === false;
+    if (historical) {
+      const freshness = document.createElement("p"); freshness.className = "ops-photo-analysis-stale";
+      freshness.textContent = "Earlier ERP state — reanalyze before using for current decision.";
+      section.append(freshness);
+    }
+    const header = document.createElement("div"); header.className = "ops-photo-analysis-header";
+    const title = document.createElement("strong"); title.textContent = status === "COMPLETE" ? "Agent photo observation" : "Photo analysis unavailable";
+    const badge = document.createElement("span");
+    badge.className = `state-badge state-${status === "COMPLETE" ? "cyan" : status === "UNAVAILABLE" ? "coral" : "neutral"}`;
+    badge.textContent = status ? pretty(status) : "Status unavailable";
+    header.append(title, badge); section.append(header);
+    const observation = document.createElement("p"); observation.className = "ops-photo-analysis-observation";
+    const observationLabel = document.createElement("strong"); observationLabel.textContent = "Visible observation: ";
+    observation.append(observationLabel, document.createTextNode(status === "COMPLETE" ? photoAnalysisObservation(analysis) : "No visible observation was returned.")); section.append(observation);
+    const recommendationNode = document.createElement("p"); recommendationNode.className = "ops-photo-analysis-recommendation";
+    const recommendationLabel = document.createElement("strong"); recommendationLabel.textContent = `Recommendation${recommendation.code ? ` · ${pretty(recommendation.code)}` : ""}: `;
+    recommendationNode.append(recommendationLabel, document.createTextNode(recommendation.message)); section.append(recommendationNode);
+    const nextPhoto = firstText(assessment, ["next_photo"]);
+    if ((recommendation.code === "RETAKE" || condition === "unclear") && nextPhoto) {
+      const guidance = document.createElement("p"); guidance.className = "ops-photo-analysis-note";
+      const guidanceLabel = document.createElement("strong"); guidanceLabel.textContent = "Retake guidance: ";
+      guidance.append(guidanceLabel, document.createTextNode(nextPhoto)); section.append(guidance);
+    }
+    const scope = document.createElement("p"); scope.className = "ops-photo-analysis-scope";
+    const scopeLabel = document.createElement("strong"); scopeLabel.textContent = historical ? "ERP link at analysis: " : "ERP link: ";
+    const linkedLot = firstText(analysis, ["linked_lot"]);
+    const linkage = firstText(analysis, ["linkage_source"]).toUpperCase();
+    scope.append(scopeLabel, document.createTextNode(linkage === "OPERATOR_SELECTED" && linkedLot
+      ? `Operator-selected lot ${linkedLot} · ${photoLinkedQuantityText(analysis, next)}`
+      : "No operator-selected ERP lot was linked.")); section.append(scope);
+    if (recommendation.labelLotConflict) {
+      const conflict = document.createElement("p"); conflict.className = "ops-photo-analysis-note";
+      conflict.textContent = recommendation.imageLabelLot
+        ? `Photo label lot ${recommendation.imageLabelLot} differs from the selected ERP lot; the operator selection remains in force.`
+        : "The photo label differs from the selected ERP lot; the operator selection remains in force.";
+      section.append(conflict);
+    }
+    const note = document.createElement("p"); note.className = "ops-photo-analysis-note";
+    note.textContent = "Visible evidence only · hidden contents, dimensions, and quality clearance are not inferred; no stock update occurred.";
+    section.append(note);
+    renderPhotoAnalysisEvidence(section, analysis);
+    parent.append(section); return section;
+  }
+
+  function renderPhotoPreview(src, alt, caption) {
+    const preview = $("ops-photo-preview");
+    if (!preview) return;
+    const image = document.createElement("img"); image.src = src; image.alt = alt;
+    const note = document.createElement("span"); note.textContent = caption;
+    preview.replaceChildren(image, note); preview.hidden = false;
+  }
+
+  function selectExistingPhoto(photo, next) {
+    if (photoAnalysisPending || processingEvent) return;
+    const attachmentId = text(photo?.attachment_id);
+    if (!attachmentId) return;
+    resetSelectedPhoto();
+    selectedPhotoAttachmentId = attachmentId;
+    const analysis = isRecord(photo?.analysis) ? photo.analysis : null;
+    selectedPhotoLot = text(analysis?.linkage_source).toUpperCase() === "OPERATOR_SELECTED"
+      ? firstText(analysis, ["linked_lot"])
+      : "";
+    renderPhotoPreview(
+      `${API_PATH}/photo?id=${encodeURIComponent(attachmentId)}`,
+      "Attached case receiving photo; visible evidence only",
+      "Existing case photo selected · ready to review or retry analysis.",
+    );
+    renderPhotoIntake(next || projection);
+    document.querySelector(".ops-photo-intake-link")?.click();
+  }
+
+  function renderPhotoLotOptions(next) {
+    const select = $("ops-photo-lot");
+    if (!select) return;
+    const lots = Array.isArray(next?.lots) ? next.lots.filter(isRecord) : [];
+    const option = document.createElement("option"); option.value = "";
+    option.textContent = lots.length ? "Choose a current ERP lot…" : "No current ERP lots supplied";
+    select.replaceChildren(option);
+    lots.forEach((lot) => {
+      const value = photoLotIdentifier(lot);
+      if (!value) return;
+      const item = document.createElement("option"); item.value = value;
+      const quantityValue = photoLotQuantity(lot);
+      item.textContent = finite(quantityValue)
+        ? `${value} · ${formatNumber(quantityValue)} received ${text(next?.quantities?.uom) || "units"} in ERP`
+        : value;
+      select.append(item);
+    });
+    const valid = [...select.options].some((item) => item.value === selectedPhotoLot);
+    if (!valid) selectedPhotoLot = "";
+    select.value = selectedPhotoLot;
+    select.disabled = !photoAnalysisEnabled(next) || next?.available !== true || photoAnalysisPending || !lots.length;
+  }
+
+  function setPhotoAnalysisFeedback(message, tone = "") {
+    photoAnalysisFeedback = { message: text(message), tone };
+    const feedback = $("ops-photo-analysis-feedback");
+    if (!feedback) return;
+    feedback.className = `ops-feedback${tone ? ` is-${tone}` : ""}`;
+    feedback.textContent = photoAnalysisFeedback.message;
+  }
+
+  function renderPhotoIntake(next) {
+    renderPhotoLotOptions(next);
+    const input = $("ops-photo-file");
+    const button = $("ops-photo-analyze");
+    const feedback = $("ops-photo-analysis-feedback");
+    const enabled = photoAnalysisEnabled(next);
+    const hasPhoto = Boolean(selectedPhoto || selectedPhotoAttachmentId);
+    const selectedAttachment = selectedPhotoAttachmentId
+      ? photoAttachmentList(next).find((item) => text(item.attachment_id) === text(selectedPhotoAttachmentId))
+      : null;
+    const selectedAnalysis = isRecord(selectedAttachment?.analysis) ? selectedAttachment.analysis : null;
+    const selectedStatus = photoAnalysisStatus(selectedAnalysis);
+    if (input) input.disabled = photoAnalysisPending || next?.available !== true || !freshActionsAllowed(next);
+    if (button) {
+      const label = button.querySelector("span");
+      if (label) label.textContent = photoAnalysisPending
+        ? "Analyzing photo…"
+        : selectedStatus === "UNAVAILABLE" ? "Retry analysis" : selectedStatus === "COMPLETE" ? "Analyze again" : "Analyze photo";
+      button.disabled = photoAnalysisPending || processingEvent || !enabled || next?.available !== true || !sourceState?.hidden || !hasPhoto || !selectedPhotoLot;
+      if (photoAnalysisPending) button.setAttribute("aria-busy", "true"); else button.removeAttribute("aria-busy");
+    }
+    if (feedback) {
+      const defaultMessage = !enabled
+        ? "Photo analysis is not configured for this case; the attachment remains manual evidence."
+        : !hasPhoto ? "Choose a JPEG or PNG photo to begin."
+          : !selectedPhotoLot ? "Choose a current ERP lot to set the analysis scope."
+            : "The model reads visible evidence only; it does not update stock.";
+      feedback.className = `ops-feedback${photoAnalysisFeedback.tone ? ` is-${photoAnalysisFeedback.tone}` : ""}`;
+      feedback.textContent = photoAnalysisPending ? "Analyzing photo…" : photoAnalysisFeedback.message || defaultMessage;
+    }
+    const result = $("ops-photo-analysis-result");
+    if (result) {
+      result.replaceChildren();
+      result.hidden = !selectedAttachment;
+      if (selectedAttachment) renderPhotoAnalysis(result, selectedAttachment, next);
+    }
+  }
+
   function renderPhotos(next) {
     const list = $("ops-photos-list");
     if (!list) return;
+    renderPhotoIntake(next);
     const photos = photoAttachmentList(next);
     setText("ops-photos-count", photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"}` : "No photos");
     if (!photos.length) {
@@ -3234,16 +3548,26 @@
       });
       const copy = document.createElement("div");
       const title = document.createElement("strong"); title.textContent = "Attached receiving evidence";
-      const detail = document.createElement("small"); detail.textContent = `Manual photo · ${text(photo.interpretation) === "NOT_ANALYZED" ? "not analyzed" : "status unavailable"} · attachment record ${formatDate(photo.recorded_at)}`;
-      copy.append(title, detail); card.append(preview, copy); return card;
+      const detail = document.createElement("small"); detail.textContent = isRecord(photo.analysis)
+        ? `Case photo · ${pretty(photoAnalysisStatus(photo.analysis) || "analysis status unavailable")} · attachment record ${formatDate(photo.recorded_at)}`
+        : `Case photo · ${text(photo.interpretation) === "NOT_ANALYZED" ? "not analyzed" : "status unavailable"} · attachment record ${formatDate(photo.recorded_at)}`;
+      const review = document.createElement("button"); review.type = "button"; review.className = "button button-quiet ops-photo-review";
+      review.textContent = "Review / retry this photo";
+      review.disabled = photoAnalysisPending || processingEvent;
+      review.addEventListener("click", () => selectExistingPhoto(photo, next));
+      copy.append(title, detail, review); card.append(preview, copy); renderPhotoAnalysis(card, photo, next); return card;
     }));
   }
 
-  function resetSelectedPhoto() {
+  function resetSelectedPhoto({ clearInput = true } = {}) {
     selectedPhoto = null;
+    selectedPhotoAttachmentId = "";
+    selectedPhotoLot = "";
+    photoAnalysisFeedback = { message: "", tone: "" };
     if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     photoPreviewUrl = "";
-    const input = $("ops-photo-file"); if (input) input.value = "";
+    const input = $("ops-photo-file"); if (input && clearInput) input.value = "";
+    const lot = $("ops-photo-lot"); if (lot) lot.value = "";
     const preview = $("ops-photo-preview"); if (preview) { preview.hidden = true; preview.replaceChildren(); }
   }
 
@@ -3254,6 +3578,7 @@
 
   async function uploadSelectedPhoto() {
     if (!freshActionsAllowed(projection)) throw new Error("Fresh event controls are disabled for this retained operation.");
+    if (selectedPhotoAttachmentId) return selectedPhotoAttachmentId;
     if (!selectedPhoto) return "";
     const file = selectedPhoto;
     if (!/image\/(jpeg|png)/.test(file.type)) throw new Error("Choose a JPEG or PNG photo.");
@@ -3268,8 +3593,54 @@
     const response = await requestJSON(`${API_PATH}/photo`, {
       method: "POST", body: JSON.stringify({ attachment_id: id, image: encoded, media_type: file.type }),
     });
+    selectedPhotoAttachmentId = id;
     const next = unwrapProjection(response); if (next) renderProjection(next);
+    renderPhotoPreview(
+      `${API_PATH}/photo?id=${encodeURIComponent(id)}`,
+      "Saved case receiving photo; visible evidence only",
+      "Saved to this case · ready to review or analyze.",
+    );
     return id;
+  }
+  async function analyzeSelectedPhoto() {
+    if (photoAnalysisPending) return;
+    const source = projection;
+    if (!photoAnalysisEnabled(source)) {
+      setPhotoAnalysisFeedback("Photo analysis is not configured for this case.", "error"); return;
+    }
+    if (!source?.available || !sourceState?.hidden || !freshActionsAllowed(source)) {
+      setPhotoAnalysisFeedback("Photo analysis is unavailable from the current ERP case.", "error"); return;
+    }
+    if (!selectedPhoto && !selectedPhotoAttachmentId) {
+      setPhotoAnalysisFeedback("Choose a JPEG or PNG photo before analyzing.", "error"); return;
+    }
+    const lot = text(selectedPhotoLot || $("ops-photo-lot")?.value);
+    if (!lot) {
+      setPhotoAnalysisFeedback("Choose a current ERP lot to set the analysis scope.", "error"); return;
+    }
+    selectedPhotoLot = lot;
+    photoAnalysisPending = true;
+    setPhotoAnalysisFeedback("Analyzing photo…");
+    renderPhotoIntake(source);
+    try {
+      const attachmentId = await uploadSelectedPhoto();
+      const response = await requestJSON(`${API_PATH}/analyze-photo`, {
+        method: "POST",
+        body: JSON.stringify({ attachment_id: attachmentId, lot }),
+      });
+      const next = unwrapProjection(response);
+      if (next) renderProjection(next);
+      const analysis = photoAnalysisFor(projection, attachmentId);
+      const status = photoAnalysisStatus(analysis);
+      if (status === "COMPLETE") setPhotoAnalysisFeedback("Photo analyzed. Review the visible observation and recommendation below; no stock update occurred.", "success");
+      else if (status === "UNAVAILABLE") setPhotoAnalysisFeedback(photoRecommendation(analysis).message || "Photo analysis is unavailable. Retry the analysis or use manual inspection.", "error");
+      else setPhotoAnalysisFeedback("The analysis response did not include a completed observation. Retry the analysis.", "error");
+    } catch (error) {
+      setPhotoAnalysisFeedback(error.message || "Photo analysis could not be completed from the current case.", "error");
+    } finally {
+      photoAnalysisPending = false;
+      renderPhotoIntake(projection);
+    }
   }
   function updateAskButton() {
     const button = $("ops-ask-submit");
@@ -3666,21 +4037,31 @@
       processingEvent = false; updateEventButton(); renderPreparedProposal(projection);
     }
   });
+  $("ops-photo-lot")?.addEventListener("change", (event) => {
+    selectedPhotoLot = text(event.currentTarget.value);
+    if (photoAnalysisFeedback.tone === "error") setPhotoAnalysisFeedback("");
+    renderPhotoIntake(projection);
+  });
+  $("ops-photo-analyze")?.addEventListener("click", () => { void analyzeSelectedPhoto(); });
   $("ops-photo-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0] || null;
-    resetSelectedPhoto();
-    if (!file) return;
+    resetSelectedPhoto({ clearInput: false });
+    if (!file) { renderPhotoIntake(projection); return; }
     if (!freshActionsAllowed(projection)) {
       setFeedback("Fresh event controls are disabled for this retained operation.", "error");
+      event.target.value = "";
+      renderPhotoIntake(projection);
       return;
     }
     if (!/image\/(jpeg|png)/.test(file.type) || file.size <= 0 || file.size > 5_000_000) {
-      setFeedback("Choose a JPEG or PNG photo smaller than 5 MB.", "error"); return;
+      setFeedback("Choose a JPEG or PNG photo smaller than 5 MB.", "error");
+      setPhotoAnalysisFeedback("Choose a JPEG or PNG photo smaller than 5 MB.", "error");
+      event.target.value = "";
+      renderPhotoIntake(projection); return;
     }
     selectedPhoto = file; photoPreviewUrl = URL.createObjectURL(file);
-    const preview = $("ops-photo-preview"); const image = document.createElement("img");
-    image.src = photoPreviewUrl; image.alt = "Selected manual evidence photo; not analyzed";
-    preview.replaceChildren(image, Object.assign(document.createElement("span"), { textContent: "Manual attachment; not analyzed." })); preview.hidden = false;
+    renderPhotoPreview(photoPreviewUrl, "Selected receiving photo; visible evidence only", `${file.name || "Photo selected"} · ready to attach or analyze.`);
+    renderPhotoIntake(projection);
   });
   $("ops-manager-id")?.addEventListener("input", () => renderPreparedProposal(projection));
   $("ops-approve-proposal")?.addEventListener("click", async () => {

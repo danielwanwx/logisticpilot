@@ -313,11 +313,13 @@ def _snapshot_evidence_id(snapshot: Mapping[str, object]) -> str:
         for key in (
             "source_status",
             "as_of",
+            "source_revision",
             "quantities",
             "lots",
             "allocations",
             "contract_terms",
             "prepared_picks",
+            "photo_observations",
         )
     }
     return (
@@ -401,6 +403,13 @@ def _evidence_ids(evidence: Mapping[str, object]) -> set[str]:
         result.update(
             row["evidence_id"]
             for row in cost["physical_fit"]
+            if isinstance(row, Mapping) and isinstance(row.get("evidence_id"), str)
+        )
+    operational = evidence.get("operational_snapshot")
+    if isinstance(operational, Mapping) and isinstance(operational.get("photo_observations"), list):
+        result.update(
+            row["evidence_id"]
+            for row in operational["photo_observations"]
             if isinstance(row, Mapping) and isinstance(row.get("evidence_id"), str)
         )
     return result
@@ -631,6 +640,35 @@ def economic_projection(
             "ref": fits[20]["evidence_id"],
         },
     ]
+    photo_observations = operational_snapshot.get("photo_observations")
+    if isinstance(photo_observations, list):
+        for observation in photo_observations:
+            if not isinstance(observation, Mapping):
+                continue
+            evidence_id = observation.get("evidence_id")
+            attachment_digest = observation.get("attachment_sha256")
+            observed_at = observation.get("observed_at")
+            if not (
+                isinstance(evidence_id, str)
+                and isinstance(attachment_digest, str)
+                and isinstance(observed_at, str)
+            ):
+                continue
+            source_evidence.append(
+                {
+                    "label": "Operator-linked photo observation (advisory only)",
+                    "kind": "PHOTO_OBSERVATION",
+                    "checked_at": observed_at,
+                    "ref": evidence_id,
+                    "attachment_sha256": attachment_digest,
+                    "source_revision": observation.get("source_revision"),
+                    "linked_lot": observation.get("linked_lot"),
+                    "linkage_source": observation.get("linkage_source"),
+                    "linked_quantity": observation.get("linked_quantity"),
+                    "recommendation_code": observation.get("recommendation_code"),
+                    "advisory_only": True,
+                }
+            )
     proposal_effect: dict[str, object] | None = None
     if isinstance(last_result, Mapping) and isinstance(
         last_result.get("requested_candidate_id"), str
@@ -882,6 +920,9 @@ def select_economic_candidate(
                 "or late penalties. If the raw evidence does not support a unique defensible "
                 "choice, return DEFER. Distinguish what is currently executable from what remains "
                 "future-conditional; never call an unknown future cost unavoidable or realized. "
+                "Photo observations, when present in the operational snapshot, are advisory only; "
+                "they cannot replace ERP lot status or usable quantity. Cite a photo evidence_id "
+                "only when it informs your rationale. "
                 "Cite exact evidence_id values from every raw source. "
                 "You cannot "
                 "write, prepare, approve, book, pay, or execute anything."

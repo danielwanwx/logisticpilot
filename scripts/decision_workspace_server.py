@@ -234,7 +234,7 @@ def _headers(content_type: str, content_length: int | None = None) -> dict[str, 
             # style attributes while keeping scripts, connections, images,
             # frames, and form submissions locked to this local origin.
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "connect-src 'self'; img-src 'self'; media-src 'self' blob:; "
+            "connect-src 'self'; img-src 'self' blob:; media-src 'self' blob:; "
             "base-uri 'none'; form-action 'none'; "
             "frame-ancestors 'none'"
         ),
@@ -2196,6 +2196,8 @@ class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
                 should_sync = True
             elif action == "photo":
                 result = operations.attach_photo(payload)
+            elif action == "analyze-photo":
+                result = operations.analyze_photo(payload)
             elif action == "prepare-proposal":
                 result = operations.prepare_event_proposal(payload)
             elif action == "prepare-economic-proposal":
@@ -2717,6 +2719,7 @@ class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
             "/api/v1/agent-platform/normal-billing/reconcile",
             "/api/v1/distributor-operations/events",
             "/api/v1/distributor-operations/photo",
+            "/api/v1/distributor-operations/analyze-photo",
             "/api/v1/distributor-operations/prepare-proposal",
             "/api/v1/distributor-operations/prepare-economic-proposal",
             "/api/v1/distributor-operations/approve-proposal",
@@ -3000,6 +3003,16 @@ class DecisionWorkspaceServer(ThreadingHTTPServer):
                 and distributor_settings.agent_provider is AgentProvider.BEDROCK
                 else None
             )
+            operations_photo_analysis = (
+                photo_values.get("MISSING20_OPERATIONS_PHOTO_ANALYSIS", "0") == "1"
+            )
+            if (
+                operations_photo_analysis
+                and distributor_settings.agent_provider is not AgentProvider.BEDROCK
+            ):
+                raise ValueError(
+                    "operations photo analysis requires the explicitly configured Bedrock provider"
+                )
             self.distributor_operations = DistributorOperations(
                 normal_billing_runtime / "distributor-operations.sqlite3",
                 raw_operations_config,
@@ -3007,6 +3020,9 @@ class DecisionWorkspaceServer(ThreadingHTTPServer):
                 ask_turn=distributor_ask_turn,
                 allocation_selector=distributor_allocation_selector,
                 economic_selector=distributor_economic_selector,
+                photo_reader=(
+                    StrandsPhotoReader(distributor_settings) if operations_photo_analysis else None
+                ),
                 retained_projection=(
                     photo_values.get("MISSING20_DISTRIBUTOR_RETAINED_PROJECTION", "0") == "1"
                 ),

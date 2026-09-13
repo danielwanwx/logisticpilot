@@ -119,6 +119,91 @@ def test_model_defer_still_requires_all_raw_evidence_tool_reads() -> None:
     assert failure == "MODEL_SOURCE_READS_INCOMPLETE"
 
 
+def test_current_photo_observation_is_optional_operational_advisory_evidence() -> None:
+    config = _economic_plan(
+        supplier="SYNTHETIC-SUPPLIER",
+        date="2026-09-13",
+        purchase_order="PUR-ECONOMIC-TEST",
+        purchase_order_item="PUR-ECONOMIC-TEST-ITEM",
+        instance="TEST",
+    )
+    order = config["allocations"][0]["customer_order"]
+    snapshot = {
+        "source_status": "CURRENT",
+        "source_revision": "erp-readback-1",
+        "quantities": {"usable": 20, "held": 5},
+        "lots": [
+            {"lot": "LOT-A20", "usable": 20, "held": 0, "status": "QUALIFIED"},
+            {"lot": "LOT-B5", "usable": 0, "held": 5, "status": "HELD"},
+        ],
+        "allocations": [{"customer_order": order, "requested_quantity": 25, "allocated": 20}],
+        "contract_terms": config["allocations"],
+        "prepared_picks": [],
+        "photo_observations": [
+            {
+                "evidence_id": "photo:ab12",
+                "attachment_sha256": "a" * 64,
+                "source_revision": "erp-readback-1",
+                "observed_at": "2026-09-13T16:00:00+00:00",
+                "linked_lot": "LOT-B5",
+                "linkage_source": "OPERATOR_SELECTED",
+                "linked_quantity": 5,
+                "visibility": "clear",
+                "visible_condition": "visible_damage",
+                "recommendation_code": "REQUIRE_INSPECTION",
+                "label_lot_conflict": False,
+                "authority": "Advisory photo observation only.",
+            }
+        ],
+    }
+
+    evidence = raw_economic_evidence(config, snapshot)
+    operational = evidence["operational_snapshot"]
+    assert operational["photo_observations"] == snapshot["photo_observations"]
+    assert evidence["quality"]["lots"] == snapshot["lots"]
+    assert evidence["quality"]["lots"][1]["status"] == "HELD"
+
+    selected, failure = _validated_model_selection(
+        {
+            "candidate_id": "split20",
+            "rationale": "The current photo is advisory; the ERP release state controls the split.",
+            "citations": [
+                evidence["contract"]["evidence_id"],
+                evidence["quality"]["evidence_id"],
+                evidence["cost"]["evidence_id"],
+                operational["evidence_id"],
+                "photo:ab12",
+            ],
+        },
+        evidence=evidence,
+        calls=[
+            "read_contract_evidence",
+            "read_quality_evidence",
+            "read_cost_evidence",
+            "read_operational_snapshot",
+        ],
+    )
+    assert failure is None
+    assert selected is not None and "photo:ab12" in selected["citations"]
+
+    projection = economic_projection(
+        config,
+        snapshot,
+        now=datetime.fromisoformat("2026-09-13T09:00:00-07:00"),
+    )
+    assert projection is not None
+    photo_source = next(
+        row for row in projection["source_evidence"] if row.get("kind") == "PHOTO_OBSERVATION"
+    )
+    assert photo_source["ref"] == "photo:ab12"
+    assert photo_source["linkage_source"] == "OPERATOR_SELECTED"
+    assert photo_source["source_revision"] == "erp-readback-1"
+    assert photo_source["linked_quantity"] == 5
+    stock_lots = projection["candidates"][0]["gate"]["stock_snapshot"]["lots"]
+    assert stock_lots[1]["lot"] == "LOT-B5"
+    assert stock_lots[1]["held"] == 5
+
+
 def test_limit_stop_with_no_structured_result_is_a_budget_exhaustion() -> None:
     assert (
         _classify_model_failure("MODEL_DECISION_MALFORMED", stop_reason="limit_output_tokens")

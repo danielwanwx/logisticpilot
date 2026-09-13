@@ -2,6 +2,8 @@
 
 Newest acceptance: [economic decision → ERP dispatch](docs/audits/2026-09-13-economic-poc-acceptance.md). An isolated 25-unit order now has a real Bedrock comparison and an approved 20-unit native ERP dispatch, with 5 units still held. The $24.80 postage difference is a conditional estimate, not realized savings.
 
+Photo intake update: [implementation and verification status](docs/audits/2026-09-13-photo-intake-acceptance.md). The operations page now connects uploaded photos to the real image reader and ERP lot scope. Browser upload/error handling and offline checks passed; positive live image acceptance is pending AWS reauthentication. The original five-unit hold was a synthetic inspection input, not a photo finding.
+
 Earlier release evidence: [PO20 claim manifest](docs/submission/current-claim-manifest.md) · [strict judge review](docs/audits/2026-09-13-award-readiness.md). Older invoice and multi-agent results remain separate cases.
 
 > **September 13 current status:** The retained PO20 review and real Claude Opus

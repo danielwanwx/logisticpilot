@@ -40,6 +40,7 @@ from the_missing_20.agents.distributor_economics import (
 from the_missing_20.agents.distributor_economics import (
     economic_projection as project_economics,
 )
+from the_missing_20.agents.photo_receiving import PhotoAssessment, normalize_photo
 
 DISTRIBUTOR_OPERATIONS_SCHEMA_VERSION = "missing20-distributor-operations/v1"
 _SUCCESS = frozenset({"APPLIED", "ALREADY_APPLIED"})
@@ -253,6 +254,7 @@ class DistributorOperations:
         ask_turn: Callable[[str, Mapping[str, object]], Mapping[str, object]] | None = None,
         allocation_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
         economic_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
+        photo_reader: Callable[[bytes], Mapping[str, object]] | None = None,
         retained_projection: bool = False,
     ) -> None:
         self._config = self._validate_config(config)
@@ -261,6 +263,7 @@ class DistributorOperations:
         self._ask_turn = ask_turn
         self._allocation_selector = allocation_selector
         self._economic_selector = economic_selector
+        self._photo_reader = photo_reader
         self._economic_last_result: dict[str, object] | None = None
         self._economic_prepare_authorization: tuple[str, str] | None = None
         self._retained_projection = retained_projection
@@ -291,8 +294,12 @@ class DistributorOperations:
             "CREATE TABLE IF NOT EXISTS distributor_operation_attachments "
             "(attachment_id TEXT PRIMARY KEY, case_id TEXT NOT NULL, media_type TEXT NOT NULL, "
             "image BLOB NOT NULL, digest TEXT NOT NULL, proposal_id TEXT, event_id TEXT, "
-            "recorded_at TEXT NOT NULL)"
+            "recorded_at TEXT NOT NULL, analysis_json TEXT)"
         )
+        with suppress(sqlite3.OperationalError):
+            self._db.execute(
+                "ALTER TABLE distributor_operation_attachments ADD COLUMN analysis_json TEXT"
+            )
         self._lock = RLock()
 
     @property
@@ -300,6 +307,12 @@ class DistributorOperations:
         """Whether this instance serves durable evidence without live ERP reads."""
 
         return self._retained_projection
+
+    @property
+    def photo_analysis_enabled(self) -> bool:
+        """Whether this configured operation has an explicitly injected real photo reader."""
+
+        return self._photo_reader is not None
 
     def close(self) -> None:
         with self._lock:
@@ -606,6 +619,79 @@ class DistributorOperations:
                 raise ValueError("photo attachment is unavailable for this case")
             image, media_type = cast(tuple[bytes, str], row)
             return image, media_type
+
+    def analyze_photo(self, request: Mapping[str, object]) -> dict[str, object]:
+        """Read one retained photo as advisory evidence without creating an event or stock write."""
+
+        if set(request) - {"attachment_id", "lot"} or "attachment_id" not in request:
+            raise ValueError("photo analysis requires attachment_id and optional lot")
+        reader = self._photo_reader
+        if reader is None:
+            raise ValueError("operations photo analysis is not enabled")
+        self._require_live_operations()
+        attachment_id = _text(request.get("attachment_id"), "attachment_id")
+        requested_lot = (
+            _text(request.get("lot"), "photo analysis lot")
+            if request.get("lot") is not None
+            else None
+        )
+        with self._lock:
+            row = self._db.execute(
+                "SELECT image, digest FROM distributor_operation_attachments "
+                "WHERE attachment_id=? AND case_id=?",
+                (attachment_id, self._config["case_id"]),
+            ).fetchone()
+            if row is None:
+                raise ValueError("photo attachment is unavailable for this case")
+            image, digest = cast(tuple[bytes, str], row)
+            source = self._read_source()
+            state = self._latest_state() or self._initial_state()
+            state, source = self._merge_source(state, source)
+            source_revision = self._source_revision(source)
+            linked_lot = self._analysis_lot(source, requested_lot)
+            linked_quantity = (
+                _wire(_quantity(linked_lot["received"], "linked lot received"))
+                if linked_lot is not None
+                else None
+            )
+            lot_name = linked_lot["lot"] if linked_lot is not None else None
+            if source.get("source_status") != "CURRENT" or source_revision is None:
+                analysis = self._unavailable_photo_analysis(
+                    digest=digest,
+                    source_revision=None,
+                    linked_lot=lot_name,
+                    linked_quantity=linked_quantity,
+                    message="Current ERP evidence is unavailable; photo analysis can be retried.",
+                )
+                self._store_photo_analysis(attachment_id, analysis)
+                return self._projection(state, source)
+            cached = self._cached_photo_analysis(
+                digest=digest, source_revision=source_revision, linked_lot=lot_name
+            )
+            if cached is not None:
+                self._store_photo_analysis(attachment_id, cached)
+                return self._projection(state, source)
+            try:
+                # The reader receives only normalized pixels. Attachment IDs, filenames and
+                # operator-entered lot information are never prompt context.
+                result = reader(normalize_photo(image))
+                analysis = self._complete_photo_analysis(
+                    result,
+                    digest=digest,
+                    source_revision=source_revision,
+                    linked_lot=lot_name,
+                    linked_quantity=linked_quantity,
+                )
+            except Exception:
+                analysis = self._unavailable_photo_analysis(
+                    digest=digest,
+                    source_revision=source_revision,
+                    linked_lot=lot_name,
+                    linked_quantity=linked_quantity,
+                    message="Photo analysis was unavailable; retry the same attachment when ready.",
+                )
+            self._store_photo_analysis(attachment_id, analysis)
+            return self._projection(state, source)
 
     def prepare_event_proposal(self, request: Mapping[str, object]) -> dict[str, object]:
         """Store a non-mutating, source-fresh proposal for manager review."""
@@ -1416,12 +1502,88 @@ class DistributorOperations:
         return {
             "source_status": source.get("source_status"),
             "as_of": self._source_as_of(source),
+            "source_revision": self._source_revision(source),
             "quantities": _copy(source.get("quantities", state.get("quantities", {}))),
             "lots": _copy(source.get("lots", state.get("lots", []))),
             "allocations": _copy(source.get("allocations", state.get("allocations", []))),
             "contract_terms": _copy(self._config.get("allocations", [])),
             "prepared_picks": _copy(state.get("prepared_picks", [])),
+            "photo_observations": self._current_photo_observations(source),
         }
+
+    def _current_photo_observations(self, source: Mapping[str, object]) -> list[dict[str, object]]:
+        """Offer current photo evidence to advisory economics without making it stock authority."""
+
+        source_revision = self._source_revision(source)
+        if source.get("source_status") != "CURRENT" or source_revision is None:
+            return []
+        rows = self._db.execute(
+            "SELECT digest, analysis_json FROM distributor_operation_attachments "
+            "WHERE case_id=? AND analysis_json IS NOT NULL ORDER BY recorded_at, attachment_id",
+            (self._config["case_id"],),
+        ).fetchall()
+        observations: list[dict[str, object]] = []
+        for digest, raw_analysis in rows:
+            if not isinstance(digest, str) or not isinstance(raw_analysis, str):
+                continue
+            try:
+                analysis = _decoded(raw_analysis, "photo analysis")
+            except RuntimeError:
+                continue
+            recommendation = analysis.get("recommendation")
+            assessment = analysis.get("assessment")
+            if (
+                analysis.get("status") != "COMPLETE"
+                or analysis.get("attachment_sha256") != digest
+                or analysis.get("source_revision") != source_revision
+                or not isinstance(recommendation, Mapping)
+                or not isinstance(assessment, Mapping)
+            ):
+                continue
+            observed_at = analysis.get("observed_at")
+            code = recommendation.get("code")
+            visible_condition = assessment.get("visible_condition")
+            visibility = assessment.get("visibility")
+            if not (
+                isinstance(observed_at, str)
+                and isinstance(code, str)
+                and isinstance(visible_condition, str)
+                and isinstance(visibility, str)
+            ):
+                continue
+            linked_lot = analysis.get("linked_lot")
+            linkage_source = analysis.get("linkage_source")
+            observations.append(
+                {
+                    "evidence_id": "photo:"
+                    + sha256(
+                        _encode(
+                            {
+                                "attachment_sha256": digest,
+                                "source_revision": source_revision,
+                                "linked_lot": linked_lot,
+                            }
+                        ).encode("utf-8")
+                    ).hexdigest()[:24],
+                    "attachment_sha256": digest,
+                    "source_revision": source_revision,
+                    "observed_at": observed_at,
+                    "linked_lot": linked_lot if isinstance(linked_lot, str) else None,
+                    "linkage_source": (
+                        linkage_source if linkage_source == "OPERATOR_SELECTED" else None
+                    ),
+                    "linked_quantity": analysis.get("linked_quantity"),
+                    "visibility": visibility,
+                    "visible_condition": visible_condition,
+                    "recommendation_code": code,
+                    "label_lot_conflict": recommendation.get("label_lot_conflict") is True,
+                    "authority": (
+                        "Advisory photo observation only; current ERP lot status and usable "
+                        "quantity remain the feasibility authority."
+                    ),
+                }
+            )
+        return observations
 
     def _economic_view(
         self, snapshot: Mapping[str, object], last_result: Mapping[str, object] | None
@@ -1955,6 +2117,14 @@ class DistributorOperations:
             canonical["as_of"] = as_of
         if parent_purchase_order is not None:
             canonical["parent_purchase_order"] = parent_purchase_order
+        raw_revision = source.get("source_revision")
+        if isinstance(raw_revision, str) and raw_revision.strip():
+            canonical["source_revision"] = raw_revision.strip()
+        else:
+            revision_material = {key: value for key, value in canonical.items() if key != "as_of"}
+            canonical["source_revision"] = (
+                "operational:" + sha256(_encode(revision_material).encode("utf-8")).hexdigest()[:24]
+            )
         return canonical
 
     def _canonical_parent_purchase_order(
@@ -3982,7 +4152,8 @@ class DistributorOperations:
             if source["source_status"] == "RETAINED" or retained_at is not None
             else self._event_templates()
         )
-        self._add_photo_attachments(result)
+        result["photo_analysis_enabled"] = self.photo_analysis_enabled
+        self._add_photo_attachments(result, source)
         proposal = self._current_proposal()
         if proposal is not None:
             result["prepared_proposal"] = {
@@ -4100,16 +4271,219 @@ class DistributorOperations:
             ).encode("utf-8")
         ).hexdigest()
 
-    def _attachment_metadata(self, attachment_id: str) -> dict[str, object]:
+    @staticmethod
+    def _source_revision(source: Mapping[str, object]) -> str | None:
+        value = source.get("source_revision")
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def _analysis_lot(
+        self, source: Mapping[str, object], requested_lot: str | None
+    ) -> Mapping[str, object] | None:
+        """Accept only an operator-selected lot from the current configured ERP scope."""
+
+        if requested_lot is None or source.get("source_status") != "CURRENT":
+            return None
+        lots = source.get("lots")
+        matches = (
+            [row for row in lots if isinstance(row, Mapping) and row.get("lot") == requested_lot]
+            if isinstance(lots, list)
+            else []
+        )
+        if len(matches) != 1:
+            raise ValueError("photo analysis lot is not a current configured lot")
+        return matches[0]
+
+    @staticmethod
+    def _safe_photo_value(value: object, *, mapping: bool = False) -> object:
+        """Retain only JSON metadata from a reader result; malformed metadata is display-empty."""
+
+        if mapping and not isinstance(value, Mapping):
+            return {}
+        if not mapping and not isinstance(value, list):
+            return []
+        try:
+            return _copy(value)
+        except (TypeError, ValueError):
+            return {} if mapping else []
+
+    @staticmethod
+    def _optional_photo_text(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        return text if text and len(text) <= 256 else None
+
+    def _complete_photo_analysis(
+        self,
+        result: Mapping[str, object],
+        *,
+        digest: str,
+        source_revision: str,
+        linked_lot: object,
+        linked_quantity: object,
+    ) -> dict[str, object]:
+        if not isinstance(result, Mapping):
+            raise ValueError("photo reader result is malformed")
+        assessment = PhotoAssessment.model_validate(result.get("assessment"))
+        image_label_lot = assessment.supplier_lot or None
+        selected_lot = _text(linked_lot, "linked photo lot") if linked_lot is not None else None
+        label_lot_conflict = (
+            selected_lot is not None
+            and image_label_lot is not None
+            and image_label_lot != selected_lot
+        )
+        if assessment.visibility != "clear":
+            code = "RETAKE"
+            message = (
+                "The receiving units are not fully visible; take the requested replacement photo."
+            )
+        elif assessment.visible_condition == "visible_damage":
+            code = "REQUIRE_INSPECTION"
+            message = (
+                "Visible damage requires an operator-confirmed inspection; "
+                "it is not a quality disposition."
+            )
+        elif assessment.visible_condition == "no_visible_damage":
+            code = "NO_VISIBLE_DAMAGE_NOT_QUALITY_CLEARANCE"
+            message = "No visible outer damage is not a quality release or stock disposition."
+        else:
+            code = "PHOTO_CONDITION_REQUIRES_REVIEW"
+            message = "The visible condition is unclear; review or take another photo."
+        if label_lot_conflict and assessment.visibility == "clear":
+            code = "REQUIRE_INSPECTION"
+            message = (
+                "The legible image label conflicts with the operator-selected lot; verify the "
+                "association before using this photo as advisory evidence."
+            )
+        raw_latency = result.get("latency_ms")
+        latency = (
+            raw_latency
+            if isinstance(raw_latency, (int, float))
+            and not isinstance(raw_latency, bool)
+            and math.isfinite(raw_latency)
+            and raw_latency >= 0
+            else None
+        )
+        return {
+            "status": "COMPLETE",
+            "assessment": assessment.model_dump(mode="json"),
+            "model": self._optional_photo_text(result.get("model")),
+            "provider": self._optional_photo_text(result.get("provider")),
+            "transport": self._optional_photo_text(result.get("transport")),
+            "stages": self._safe_photo_value(result.get("stages", [])),
+            "usage": self._safe_photo_value(result.get("usage", {}), mapping=True),
+            "latency_ms": latency,
+            "observed_at": self._next_recorded_at(),
+            "attachment_sha256": digest,
+            "source_revision": source_revision,
+            "linked_lot": selected_lot,
+            "linkage_source": "OPERATOR_SELECTED" if selected_lot is not None else None,
+            "linked_quantity": linked_quantity,
+            "recommendation": {
+                "code": code,
+                "message": message,
+                "image_label_lot": image_label_lot,
+                "label_lot_conflict": label_lot_conflict,
+                "identity_review_required": label_lot_conflict,
+            },
+        }
+
+    def _unavailable_photo_analysis(
+        self,
+        *,
+        digest: str,
+        source_revision: str | None,
+        linked_lot: object,
+        linked_quantity: object,
+        message: str,
+    ) -> dict[str, object]:
+        selected_lot = _text(linked_lot, "linked photo lot") if linked_lot is not None else None
+        return {
+            "status": "UNAVAILABLE",
+            "assessment": None,
+            "model": None,
+            "provider": None,
+            "transport": None,
+            "stages": [],
+            "usage": {},
+            "latency_ms": None,
+            "observed_at": self._next_recorded_at(),
+            "attachment_sha256": digest,
+            "source_revision": source_revision,
+            "linked_lot": selected_lot,
+            "linkage_source": "OPERATOR_SELECTED" if selected_lot is not None else None,
+            "linked_quantity": linked_quantity,
+            "recommendation": {
+                "code": "ANALYSIS_UNAVAILABLE",
+                "message": message,
+                "image_label_lot": None,
+                "label_lot_conflict": False,
+                "identity_review_required": False,
+            },
+            "retryable": True,
+        }
+
+    def _cached_photo_analysis(
+        self, *, digest: str, source_revision: str, linked_lot: object
+    ) -> dict[str, object] | None:
+        selected_lot = _text(linked_lot, "linked photo lot") if linked_lot is not None else None
+        rows = self._db.execute(
+            "SELECT analysis_json FROM distributor_operation_attachments "
+            "WHERE case_id=? AND digest=? AND analysis_json IS NOT NULL ORDER BY recorded_at DESC",
+            (self._config["case_id"], digest),
+        ).fetchall()
+        for (raw_analysis,) in rows:
+            if not isinstance(raw_analysis, str):
+                continue
+            try:
+                analysis = _decoded(raw_analysis, "photo analysis")
+            except RuntimeError:
+                continue
+            if (
+                analysis.get("status") == "COMPLETE"
+                and analysis.get("attachment_sha256") == digest
+                and analysis.get("source_revision") == source_revision
+                and analysis.get("linked_lot") == selected_lot
+            ):
+                return analysis
+        return None
+
+    def _store_photo_analysis(self, attachment_id: str, analysis: Mapping[str, object]) -> None:
+        updated = self._db.execute(
+            "UPDATE distributor_operation_attachments SET analysis_json=? "
+            "WHERE attachment_id=? AND case_id=?",
+            (_encode(analysis), attachment_id, self._config["case_id"]),
+        ).rowcount
+        if updated != 1:  # pragma: no cover - protected by the caller's attachment read
+            raise ValueError("photo attachment is unavailable for this case")
+
+    def _attachment_metadata(
+        self, attachment_id: str, *, current_source_revision: str | None = None
+    ) -> dict[str, object]:
         row = self._db.execute(
-            "SELECT attachment_id, media_type, digest, proposal_id, event_id, recorded_at "
+            "SELECT attachment_id, media_type, digest, proposal_id, event_id, recorded_at, "
+            "analysis_json "
             "FROM distributor_operation_attachments WHERE attachment_id=? AND case_id=?",
             (attachment_id, self._config["case_id"]),
         ).fetchone()
         if row is None:
             raise ValueError("photo attachment is unavailable for this case")
-        identifier, media_type, digest, proposal_id, event_id, recorded_at = cast(
-            tuple[str, str, str, str | None, str | None, str], row
+        identifier, media_type, digest, proposal_id, event_id, recorded_at, raw_analysis = cast(
+            tuple[str, str, str, str | None, str | None, str, str | None], row
+        )
+        analysis = _decoded(raw_analysis, "photo analysis") if raw_analysis is not None else None
+        if analysis is not None:
+            analysis["advisory_current"] = (
+                analysis.get("status") == "COMPLETE"
+                and current_source_revision is not None
+                and analysis.get("source_revision") == current_source_revision
+            )
+        interpretation = (
+            "NOT_ANALYZED"
+            if analysis is None
+            else "BEDROCK_PHOTO_OBSERVATION"
+            if analysis.get("status") == "COMPLETE"
+            else "ANALYSIS_UNAVAILABLE"
         )
         return {
             "attachment_id": identifier,
@@ -4119,17 +4493,24 @@ class DistributorOperations:
             "event_id": event_id,
             "recorded_at": recorded_at,
             "source": "OPERATOR_ATTACHED_PHOTO",
-            "interpretation": "NOT_ANALYZED",
+            "interpretation": interpretation,
+            "analysis": analysis,
         }
 
-    def _add_photo_attachments(self, projection: dict[str, object]) -> None:
+    def _add_photo_attachments(
+        self, projection: dict[str, object], source: Mapping[str, object]
+    ) -> None:
+        current_source_revision = self._source_revision(source)
         rows = self._db.execute(
             "SELECT attachment_id FROM distributor_operation_attachments WHERE case_id=? "
             "ORDER BY recorded_at, attachment_id",
             (self._config["case_id"],),
         ).fetchall()
         projection["photo_attachments"] = [
-            self._attachment_metadata(cast(str, row[0])) for row in rows
+            self._attachment_metadata(
+                cast(str, row[0]), current_source_revision=current_source_revision
+            )
+            for row in rows
         ]
 
     def _require_unbound_attachment(self, attachment_id: str) -> None:

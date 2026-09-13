@@ -9,12 +9,14 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from botocore.exceptions import ClientError, LoginRefreshRequired  # type: ignore[import-untyped]
+from PIL import Image
 from test_distributor_erp import NativeERP
 from test_distributor_erp import r4_config as native_r4_config
 
@@ -303,6 +305,43 @@ def _service(
     )
     bridge.state_provider = service._latest_state
     return service, bridge
+
+
+def _photo_png(*, color: tuple[int, int, int]) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (80, 80), color).save(output, format="PNG")
+    return output.getvalue()
+
+
+def _photo_reader_result(
+    *, visibility: str = "clear", visible_condition: str = "visible_damage", lot: str = ""
+) -> dict[str, object]:
+    return {
+        "assessment": {
+            "visibility": visibility,
+            "countable": visibility == "clear",
+            "objects": (
+                [{"x": 0.2, "y": 0.3, "description": "one visible outer carton"}]
+                if visibility == "clear"
+                else []
+            ),
+            "receiving_unit": "carton" if visibility == "clear" else "unknown",
+            "item_code": "",
+            "supplier_lot": lot,
+            "label_declared_quantity": None,
+            "issues": [] if visibility == "clear" else ["The carton is cropped by the frame."],
+            "visible_condition": visible_condition if visibility == "clear" else "unclear",
+            "next_photo": "Retake the photo with the full carton visible."
+            if visibility != "clear"
+            else "",
+        },
+        "model": "offline-photo-reader",
+        "provider": "bedrock",
+        "transport": "strands_multimodal",
+        "stages": [{"stage": "visibility"}],
+        "usage": {"outputTokens": 12},
+        "latency_ms": 4,
+    }
 
 
 def _event(event_id: str, event_type: str, **fields: object) -> dict[str, object]:
@@ -2096,6 +2135,171 @@ def test_proposal_rejects_stale_case_and_manual_photo_stays_unanalyzed(tmp_path:
             }
         )
     assert [kind for kind, _event_id, _operation in bridge.calls] == ["receive_arrival"]
+
+
+def test_photo_analysis_is_advisory_cached_and_keeps_operator_lot_scope(tmp_path: Path) -> None:
+    config = _component_config()
+    bridge = _Bridge(config)
+    reader_calls: list[bytes] = []
+
+    def reader(image: bytes) -> Mapping[str, object]:
+        reader_calls.append(image)
+        return _photo_reader_result(lot="LOT-C")
+
+    service = DistributorOperations(
+        tmp_path / "photo-analysis.sqlite3", config, bridge, photo_reader=reader
+    )
+    bridge.state_provider = service._latest_state
+    service.record_event(_arrival("arrival-b", lot="LOT-B", cartons=2, observed=18))
+    calls_before_analysis = list(bridge.calls)
+    events_before_analysis = list(cast(list[object], service.projection()["events"]))
+    image = _photo_png(color=(170, 20, 20))
+    encoded = base64.b64encode(image).decode("ascii")
+    service.attach_photo(
+        {"attachment_id": "damaged-carton-a", "media_type": "image/png", "image": encoded}
+    )
+
+    handler = cast(Any, object.__new__(DecisionWorkspaceHandler))
+    handler.server = SimpleNamespace(distributor_operations=service)
+    sent: list[object] = []
+    handler._send_json = lambda _status, value: sent.append(value)
+    handler._v1_post(
+        "/api/v1/distributor-operations/analyze-photo",
+        {"attachment_id": "damaged-carton-a", "lot": "LOT-B"},
+    )
+
+    projection = cast(dict[str, object], sent[-1])["distributor_operations"]
+    assert isinstance(projection, dict) and projection["photo_analysis_enabled"] is True
+    photo = cast(list[Mapping[str, object]], projection["photo_attachments"])[0]
+    analysis = cast(Mapping[str, object], photo["analysis"])
+    recommendation = cast(Mapping[str, object], analysis["recommendation"])
+    assert photo["interpretation"] == "BEDROCK_PHOTO_OBSERVATION"
+    assert analysis["status"] == "COMPLETE"
+    assert analysis["linked_lot"] == "LOT-B"
+    assert analysis["linkage_source"] == "OPERATOR_SELECTED"
+    assert analysis["linked_quantity"] == 18
+    assert analysis["advisory_current"] is True
+    assert recommendation["code"] == "REQUIRE_INSPECTION"
+    assert recommendation["image_label_lot"] == "LOT-C"
+    assert recommendation["label_lot_conflict"] is True
+    assert len(reader_calls) == 1
+    assert bridge.calls == calls_before_analysis
+    assert service.projection()["events"] == events_before_analysis
+
+    service.analyze_photo({"attachment_id": "damaged-carton-a", "lot": "LOT-B"})
+    service.attach_photo(
+        {"attachment_id": "damaged-carton-b", "media_type": "image/png", "image": encoded}
+    )
+    duplicate = service.analyze_photo({"attachment_id": "damaged-carton-b", "lot": "LOT-B"})
+    duplicate_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], duplicate["photo_attachments"])
+        if row["attachment_id"] == "damaged-carton-b"
+    )
+    assert len(reader_calls) == 1
+    assert (
+        cast(Mapping[str, object], duplicate_photo["analysis"])["attachment_sha256"]
+        == photo["digest"]
+    )
+    assert bridge.calls == calls_before_analysis
+
+    stale_source = cast(dict[str, object], bridge.read_case(config))
+    stale_source["source_revision"] = "after-dispatch-readback"
+    bridge.source_override = stale_source
+    stale = service.projection()
+    stale_photo = cast(list[Mapping[str, object]], stale["photo_attachments"])[0]
+    assert cast(Mapping[str, object], stale_photo["analysis"])["advisory_current"] is False
+    state = service._latest_state() or service._initial_state()
+    current_snapshot = service._economic_operational_snapshot(state, service._read_source())
+    assert current_snapshot["photo_observations"] == []
+
+
+def test_photo_analysis_retake_unavailable_and_invalid_lot_are_safe(tmp_path: Path) -> None:
+    config = _component_config()
+    bridge = _Bridge(config)
+    reader_calls = 0
+
+    def reader(_image: bytes) -> Mapping[str, object]:
+        nonlocal reader_calls
+        reader_calls += 1
+        return _photo_reader_result(visibility="cropped")
+
+    service = DistributorOperations(
+        tmp_path / "photo-retake.sqlite3", config, bridge, photo_reader=reader
+    )
+    bridge.state_provider = service._latest_state
+    service.attach_photo(
+        {
+            "attachment_id": "cropped-carton",
+            "media_type": "image/png",
+            "image": base64.b64encode(_photo_png(color=(20, 20, 170))).decode("ascii"),
+        }
+    )
+    retake = service.analyze_photo({"attachment_id": "cropped-carton"})
+    retake_photo = cast(list[Mapping[str, object]], retake["photo_attachments"])[0]
+    retake_analysis = cast(Mapping[str, object], retake_photo["analysis"])
+    assert cast(Mapping[str, object], retake_analysis["recommendation"])["code"] == "RETAKE"
+    assert retake_analysis["linked_lot"] is None
+    assert bridge.calls == []
+    assert reader_calls == 1
+
+    with pytest.raises(ValueError, match="current configured lot"):
+        service.analyze_photo({"attachment_id": "cropped-carton", "lot": "NOT-A-LOT"})
+    assert reader_calls == 1
+    assert bridge.calls == []
+
+    service._photo_reader = lambda _image: _photo_reader_result(
+        visible_condition="no_visible_damage", lot="LOT-C"
+    )
+    service.attach_photo(
+        {
+            "attachment_id": "clean-label-conflict",
+            "media_type": "image/png",
+            "image": base64.b64encode(_photo_png(color=(20, 170, 20))).decode("ascii"),
+        }
+    )
+    conflict = service.analyze_photo({"attachment_id": "clean-label-conflict", "lot": "LOT-B"})
+    conflict_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], conflict["photo_attachments"])
+        if row["attachment_id"] == "clean-label-conflict"
+    )
+    conflict_recommendation = cast(
+        Mapping[str, object],
+        cast(Mapping[str, object], conflict_photo["analysis"])["recommendation"],
+    )
+    assert conflict_recommendation["code"] == "REQUIRE_INSPECTION"
+    assert conflict_recommendation["identity_review_required"] is True
+
+    malformed_calls = 0
+
+    def malformed(_image: bytes) -> Mapping[str, object]:
+        nonlocal malformed_calls
+        malformed_calls += 1
+        return {"assessment": {"visibility": "clear"}}
+
+    service._photo_reader = malformed
+    service.attach_photo(
+        {
+            "attachment_id": "malformed-reader",
+            "media_type": "image/png",
+            "image": base64.b64encode(_photo_png(color=(20, 170, 20))).decode("ascii"),
+        }
+    )
+    unavailable = service.analyze_photo({"attachment_id": "malformed-reader"})
+    unavailable_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], unavailable["photo_attachments"])
+        if row["attachment_id"] == "malformed-reader"
+    )
+    unavailable_analysis = cast(Mapping[str, object], unavailable_photo["analysis"])
+    assert unavailable_photo["interpretation"] == "ANALYSIS_UNAVAILABLE"
+    assert unavailable_analysis["status"] == "UNAVAILABLE"
+    assert unavailable_analysis["retryable"] is True
+    assert unavailable_analysis["advisory_current"] is False
+    assert bridge.calls == []
+    service.analyze_photo({"attachment_id": "malformed-reader"})
+    assert malformed_calls == 2
 
 
 def test_receive_reconciliation_admits_exact_submitted_receipt_without_replaying_event(
