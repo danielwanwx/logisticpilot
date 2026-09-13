@@ -48,6 +48,35 @@
   const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
   const text = (value) => typeof value === "string" ? value.trim() : "";
+  const opsTargetView = (target) => target === "ops-chat-panel" || target === "ops-evidence-panel" ? "agent" : "operations";
+  function opsTargetRoute(target, currentHref = "http://localhost/operations") {
+    const normalizedTarget = text(target).replace(/^#+/, "");
+    if (!normalizedTarget) return null;
+    let url;
+    try {
+      url = new URL(currentHref, "http://localhost");
+    } catch {
+      return null;
+    }
+    const view = opsTargetView(normalizedTarget);
+    url.searchParams.set("view", view);
+    url.hash = normalizedTarget;
+    return {
+      target: normalizedTarget,
+      view,
+      href: `${url.pathname}${url.search}${url.hash}`,
+    };
+  }
+  async function runAskQuestion({ value, asking = false, available = false, request, onEmpty } = {}) {
+    const question = text(value);
+    if (!question) {
+      if (typeof onEmpty === "function") onEmpty();
+      return { sent: false, reason: "EMPTY", question: "" };
+    }
+    if (asking || !available) return { sent: false, reason: "BLOCKED", question };
+    await request(question);
+    return { sent: true, reason: "", question };
+  }
   const firstText = (record, keys) => {
     if (!isRecord(record)) return "";
     for (const key of keys) {
@@ -980,6 +1009,8 @@
     projectionSourceState,
     proposalActionDetail,
     approvalReadback,
+    opsTargetRoute,
+    runAskQuestion,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = exported;
   if (typeof window !== "undefined") window.Missing20DistributorOperations = exported;
@@ -1232,11 +1263,7 @@
 
   function openFullOperationsEvidence() {
     closeEvidenceDrawer();
-    const url = new URL(window.location.href);
-    url.searchParams.set("view", "operations");
-    url.hash = "ops-details";
-    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    setOpsView("operations", { scrollTarget: "ops-details" });
+    focusOpsTarget("ops-details");
   }
 
   function renderUnavailablePresentation() {
@@ -1388,14 +1415,14 @@
     }
   }
 
-  function viewForOpsTarget(target) {
-    return target === "ops-chat-panel" || target === "ops-evidence-panel" ? "agent" : "operations";
-  }
-
   function focusOpsTarget(target) {
     const node = $(target);
     if (!node) return;
-    setOpsView(viewForOpsTarget(target), { scrollTarget: target });
+    const route = opsTargetRoute(target, window.location.href);
+    if (!route) return;
+    const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (route.href !== currentHref) window.history.pushState({}, "", route.href);
+    setOpsView(route.view, { scrollTarget: route.target });
   }
 
   function networkNode({ key, icon, label, detail, target, alert = false, className = "" }) {
@@ -2447,6 +2474,49 @@
     const button = $("ops-ask-submit");
     if (button) button.disabled = asking || !projection?.available || !sourceState?.hidden;
   }
+  function setAskFeedback(message) {
+    const form = $("ops-ask-form");
+    let node = $("ops-ask-feedback");
+    if (!node && !message) return;
+    if (!node && form?.parentNode) {
+      node = document.createElement("span");
+      node.id = "ops-ask-feedback";
+      node.className = "ops-feedback is-error";
+      node.setAttribute("role", "status");
+      node.setAttribute("aria-live", "polite");
+      node.setAttribute("aria-atomic", "true");
+      node.style.display = "block";
+      node.style.marginTop = "7px";
+      form.parentNode.insertBefore(node, form.nextSibling);
+    }
+    if (node) {
+      node.hidden = !message;
+      node.textContent = message || "";
+    }
+  }
+  function showAskValidation() {
+    setAskFeedback("Enter a question before asking.");
+    const input = $("ops-question");
+    if (input) {
+      input.setAttribute("aria-invalid", "true");
+      const describedBy = text(input.getAttribute("aria-describedby"));
+      const ids = describedBy ? describedBy.split(/\s+/).filter(Boolean) : [];
+      if (!ids.includes("ops-ask-feedback")) ids.push("ops-ask-feedback");
+      input.setAttribute("aria-describedby", ids.join(" "));
+      input.focus();
+    }
+  }
+  function clearAskValidation() {
+    const input = $("ops-question");
+    input?.removeAttribute("aria-invalid");
+    if (input) {
+      const ids = text(input.getAttribute("aria-describedby"))
+        .split(/\s+/).filter((id) => id && id !== "ops-ask-feedback");
+      if (ids.length) input.setAttribute("aria-describedby", ids.join(" "));
+      else input.removeAttribute("aria-describedby");
+    }
+    setAskFeedback("");
+  }
   function setFeedback(message, tone = "") {
     const node = $("ops-event-feedback"); node.className = `ops-feedback${tone ? ` is-${tone}` : ""}`; node.textContent = message;
   }
@@ -2802,16 +2872,16 @@
       event.preventDefault();
       const target = text(link.getAttribute("href")).replace(/^#/, "");
       if (!target) return;
-      const url = new URL(window.location.href);
-      url.searchParams.set("view", viewForOpsTarget(target));
-      url.hash = target;
-      window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
       focusOpsTarget(target);
     });
   });
-  window.addEventListener("popstate", () => setOpsView(requestedOpsView()));
-  window.addEventListener("hashchange", () => setOpsView(requestedOpsView()));
-  setOpsView(requestedOpsView());
+  function syncOpsViewFromLocation() {
+    const target = text(window.location.hash).replace(/^#/, "");
+    setOpsView(requestedOpsView(), { scrollTarget: target });
+  }
+  window.addEventListener("popstate", syncOpsViewFromLocation);
+  window.addEventListener("hashchange", syncOpsViewFromLocation);
+  syncOpsViewFromLocation();
   function initializeVoiceControls() {
     const recognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
     voiceController = createVoiceController({
@@ -2833,10 +2903,11 @@
     $("ops-stop-reading")?.addEventListener("click", () => voiceController.stopReading());
   }
   initializeVoiceControls();
-  $("ops-ask-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const question = text($("ops-question").value);
-    if (!question || asking || !projection?.available) return;
+  $("ops-question").addEventListener("input", (event) => {
+    if (text(event.currentTarget.value)) clearAskValidation();
+  });
+  async function requestAskQuestion(question) {
+    clearAskValidation();
     asking = true; $("ops-ask-submit").disabled = true; $("ops-ask-submit").textContent = "Asking…";
     const answerNode = $("ops-chat-answer"); answerNode.classList.remove("is-error");
     const waiting = document.createElement("p"); waiting.textContent = isRetainedEvidence(projection?.evidence_mode)
@@ -2893,6 +2964,17 @@
     } finally {
       asking = false; updateAskButton(); $("ops-ask-submit").innerHTML = '<i class="ph ph-chat-circle-dots" aria-hidden="true"></i>Ask';
     }
+  }
+  $("ops-ask-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const questionInput = $("ops-question");
+    await runAskQuestion({
+      value: questionInput.value,
+      asking,
+      available: projection?.available === true,
+      onEmpty: showAskValidation,
+      request: requestAskQuestion,
+    });
   });
 
   function startPolling() {

@@ -55,7 +55,50 @@ const {
   financialStatusMessage,
   financialOrderSummary,
   invoiceRecordSummary,
+  opsTargetRoute,
+  runAskQuestion,
 } = require('../workspace/distributor-operations.js');
+
+test('operation graph targets build a contextual route while preserving unrelated query state', () => {
+  assert.deepEqual(opsTargetRoute('#ops-chat-panel', 'https://example.test/operations?case=PO-20&view=dashboard'), {
+    target: 'ops-chat-panel',
+    view: 'agent',
+    href: '/operations?case=PO-20&view=agent#ops-chat-panel',
+  });
+  assert.deepEqual(opsTargetRoute('ops-evidence-panel', 'https://example.test/operations?case=PO-20&source=synthetic'), {
+    target: 'ops-evidence-panel',
+    view: 'agent',
+    href: '/operations?case=PO-20&source=synthetic&view=agent#ops-evidence-panel',
+  });
+  assert.deepEqual(opsTargetRoute('ops-documents-panel', 'https://example.test/operations?case=PO-20&source=synthetic'), {
+    target: 'ops-documents-panel',
+    view: 'operations',
+    href: '/operations?case=PO-20&source=synthetic&view=operations#ops-documents-panel',
+  });
+  assert.equal(opsTargetRoute('  ', 'https://example.test/operations?case=PO-20'), null);
+});
+
+test('empty Ask submission reports validation and makes no provider request', async () => {
+  const providerQuestions = [];
+  const feedback = [];
+  const emptyResult = await runAskQuestion({
+    value: ' \t\n ',
+    available: true,
+    request: (question) => providerQuestions.push(question),
+    onEmpty: () => feedback.push('empty'),
+  });
+  assert.deepEqual(emptyResult, { sent: false, reason: 'EMPTY', question: '' });
+  assert.deepEqual(providerQuestions, []);
+  assert.deepEqual(feedback, ['empty']);
+
+  const sentResult = await runAskQuestion({
+    value: '  Which order can ship?  ',
+    available: true,
+    request: (question) => providerQuestions.push(question),
+  });
+  assert.deepEqual(sentResult, { sent: true, reason: '', question: 'Which order can ship?' });
+  assert.deepEqual(providerQuestions, ['Which order can ship?']);
+});
 
 test('applied proposal keeps approval evidence after projection refresh', () => {
   const applied = {
