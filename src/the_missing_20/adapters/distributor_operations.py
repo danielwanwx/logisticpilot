@@ -28,6 +28,18 @@ from the_missing_20.adapters.distributor_allocation import (
     contract_mode,
     validate_contract_config,
 )
+from the_missing_20.agents.distributor_economics import (
+    DEFER_CANDIDATE_ID,
+    SPLIT20_CANDIDATE_ID,
+    economic_config_digest,
+    economic_gate,
+    raw_economic_evidence,
+    validate_economic_config,
+    validate_selected_candidate,
+)
+from the_missing_20.agents.distributor_economics import (
+    economic_projection as project_economics,
+)
 
 DISTRIBUTOR_OPERATIONS_SCHEMA_VERSION = "missing20-distributor-operations/v1"
 _SUCCESS = frozenset({"APPLIED", "ALREADY_APPLIED"})
@@ -240,6 +252,7 @@ class DistributorOperations:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         ask_turn: Callable[[str, Mapping[str, object]], Mapping[str, object]] | None = None,
         allocation_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
+        economic_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
         retained_projection: bool = False,
     ) -> None:
         self._config = self._validate_config(config)
@@ -247,6 +260,9 @@ class DistributorOperations:
         self._clock = clock
         self._ask_turn = ask_turn
         self._allocation_selector = allocation_selector
+        self._economic_selector = economic_selector
+        self._economic_last_result: dict[str, object] | None = None
+        self._economic_prepare_authorization: tuple[str, str] | None = None
         self._retained_projection = retained_projection
         database.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(
@@ -304,6 +320,146 @@ class DistributorOperations:
             state = self._latest_state() or self._initial_state()
             state, source = self._merge_source(state, source)
             return self._projection(state, source)
+
+    def economic_projection(self) -> dict[str, object] | None:
+        """Return optional trusted postage evidence and non-executing candidates."""
+
+        if self._config.get("economic_proposal") is None:
+            return None
+        with self._lock:
+            if self._retained_projection:
+                state = self._latest_state() or self._initial_state()
+                source: Mapping[str, object] = {
+                    "source_status": "RETAINED",
+                    "quantities": state.get("quantities", {}),
+                    "lots": state.get("lots", []),
+                    "allocations": state.get("allocations", []),
+                }
+            else:
+                source = self._read_source()
+                state = self._latest_state() or self._initial_state()
+                state, source = self._merge_source(state, source)
+            return self._economic_view(
+                self._economic_operational_snapshot(state, source), self._economic_last_result
+            )
+
+    def prepare_economic_proposal(self, request: Mapping[str, object]) -> dict[str, object]:
+        """Compare raw evidence, then optionally prepare the exact split-20 picked event.
+
+        A selection is an operator input, never a substitute for the model trace or
+        deterministic source gate.  The comparison path deliberately accepts no
+        selection and returns DEFER when model evidence is absent or malformed.
+        """
+
+        if self._config.get("economic_proposal") is None:
+            raise ValueError("economic proposal is not configured")
+        if set(request) - {"case_id", "selected_candidate_id"} or "case_id" not in request:
+            raise ValueError(
+                "economic proposal requires case_id and optional selected_candidate_id"
+            )
+        if _text(request.get("case_id"), "economic case_id") != self._config["case_id"]:
+            raise ValueError("economic proposal case does not match the configured operation")
+        selected_raw = request.get("selected_candidate_id")
+        candidate_id = (
+            _text(selected_raw, "selected_candidate_id") if selected_raw is not None else None
+        )
+        self._require_live_operations()
+        with self._lock:
+            source = self._read_source()
+            state = self._latest_state() or self._initial_state()
+            state, source = self._merge_source(state, source)
+            snapshot = self._economic_operational_snapshot(state, source)
+            evidence = raw_economic_evidence(self._config, snapshot)
+            configured = cast(Mapping[str, object], self._config["economic_proposal"])
+            if configured.get("model_enabled") is True:
+                selector = self._economic_selector
+                try:
+                    raw_selection: Mapping[str, object] = (
+                        selector(evidence)
+                        if selector is not None
+                        else {
+                            "status": "DEFER",
+                            "candidate_id": DEFER_CANDIDATE_ID,
+                            "reason": "MODEL_SELECTOR_UNAVAILABLE",
+                            "tool_trace": [],
+                            "model_response": None,
+                            "citations": [],
+                        }
+                    )
+                except Exception as error:
+                    raw_selection = {
+                        "status": "DEFER",
+                        "candidate_id": DEFER_CANDIDATE_ID,
+                        "reason": "MODEL_SELECTOR_UNAVAILABLE",
+                        "error_type": type(error).__name__,
+                        "tool_trace": [],
+                        "model_response": None,
+                        "citations": [],
+                    }
+                selector_result = validate_selected_candidate(raw_selection, evidence=evidence)
+            else:
+                selector_result = {
+                    "status": "not_run",
+                    "candidate_id": None,
+                    "reason": "MODEL_DISABLED",
+                    "tool_trace": [],
+                    "model_response": None,
+                    "citations": [],
+                }
+            gate = (
+                economic_gate(self._config, snapshot, now=self._now(), candidate_id=candidate_id)
+                if candidate_id is not None
+                else {
+                    "allowed": False,
+                    "candidate_id": None,
+                    "reasons": ["NO_CANDIDATE_SELECTED"],
+                    "checked_at": self._now().isoformat(),
+                }
+            )
+            economic = self._economic_result(
+                candidate_id=candidate_id,
+                snapshot=snapshot,
+                selector_result=selector_result,
+                gate=gate,
+            )
+            self._economic_last_result = economic
+            if candidate_id != SPLIT20_CANDIDATE_ID or gate.get("allowed") is not True:
+                projection = self._projection(state, source)
+                projection["economic_proposal"] = self._economic_view(snapshot, economic)
+                return {"economic_proposal": economic, "projection": projection}
+            event = gate.get("event")
+            if not isinstance(event, Mapping):  # pragma: no cover - economic_gate owns this
+                raise RuntimeError("economic gate did not retain its exact event")
+            event_id = _text(event.get("event_id"), "economic picked event_id")
+            proposal_id = self._economic_proposal_id(event_id)
+            self._economic_prepare_authorization = (proposal_id, event_id)
+            try:
+                prepared = self.prepare_event_proposal(
+                    {
+                        "proposal_id": proposal_id,
+                        "case_id": self._config["case_id"],
+                        "event": event,
+                        "source": "ECONOMIC_RECOMMENDATION",
+                    }
+                )
+            finally:
+                self._economic_prepare_authorization = None
+            prepared_proposal = prepared.get("prepared_proposal")
+            if isinstance(prepared_proposal, Mapping):
+                economic["prepared_proposal_id"] = prepared_proposal.get("proposal_id")
+                economic["prepared_state_revision"] = prepared_proposal.get("state_revision")
+            self._economic_last_result = economic
+            projection = cast(dict[str, object], _copy(prepared))
+            projection["economic_proposal"] = self._economic_view(snapshot, economic)
+            return {
+                "economic_proposal": economic,
+                **(
+                    {"prepared_proposal": _copy(prepared_proposal)}
+                    if isinstance(prepared_proposal, Mapping)
+                    else {}
+                ),
+                "projection": projection,
+            }
 
     def record_event(self, event: Mapping[str, object]) -> dict[str, object]:
         """Retain one physical event and run only its allowed native consequences."""
@@ -468,12 +624,22 @@ class DistributorOperations:
         if case_id != self._config["case_id"]:
             raise ValueError("proposal case does not match the configured operation")
         source = _text(request.get("source"), "proposal source")
-        if source not in {"OPERATOR_DECLARED", "RETAINED_ALLOCATION_RECOMMENDATION"}:
+        if source not in {
+            "OPERATOR_DECLARED",
+            "RETAINED_ALLOCATION_RECOMMENDATION",
+            "ECONOMIC_RECOMMENDATION",
+        }:
             raise ValueError("proposal source is not supported")
         raw_event = request.get("event")
         if not isinstance(raw_event, Mapping):
             raise ValueError("proposal event must be an object")
         event = self._validate_event(raw_event)
+        if source == "ECONOMIC_RECOMMENDATION":
+            authorized = self._economic_prepare_authorization
+            if authorized != (proposal_id, _text(event.get("event_id"), "economic event_id")):
+                raise ValueError(
+                    "economic proposals must be prepared through the economic evidence gate"
+                )
         attachment_id = request.get("photo_attachment_id")
         if attachment_id is not None:
             attachment_id = _text(attachment_id, "photo_attachment_id")
@@ -637,6 +803,19 @@ class DistributorOperations:
                 or self._proposal_revision(state, source_facts) != revision
             ):
                 raise ValueError("proposal is stale; current ERP evidence changed before approval")
+            if source == "ECONOMIC_RECOMMENDATION":
+                economic_gate_result = economic_gate(
+                    self._config,
+                    self._economic_operational_snapshot(state, source_facts),
+                    now=self._now(),
+                    candidate_id=SPLIT20_CANDIDATE_ID,
+                    event=event,
+                )
+                if economic_gate_result.get("allowed") is not True:
+                    raise ValueError(
+                        "economic proposal no longer satisfies current contract, stock, quality, "
+                        "time, or physical-fit evidence"
+                    )
             event_result = self.record_event(event)
             event_status = self._event_status_from_projection(
                 event_result,
@@ -1229,6 +1408,236 @@ class DistributorOperations:
             "event evidence"
         )
 
+    def _economic_operational_snapshot(
+        self, state: Mapping[str, object], source: Mapping[str, object]
+    ) -> dict[str, object]:
+        """Expose the current raw operations facts separately from configured evidence."""
+
+        return {
+            "source_status": source.get("source_status"),
+            "as_of": self._source_as_of(source),
+            "quantities": _copy(source.get("quantities", state.get("quantities", {}))),
+            "lots": _copy(source.get("lots", state.get("lots", []))),
+            "allocations": _copy(source.get("allocations", state.get("allocations", []))),
+            "contract_terms": _copy(self._config.get("allocations", [])),
+            "prepared_picks": _copy(state.get("prepared_picks", [])),
+        }
+
+    def _economic_view(
+        self, snapshot: Mapping[str, object], last_result: Mapping[str, object] | None
+    ) -> dict[str, object]:
+        persisted = self._persisted_economic_effect()
+        persisted_result = persisted[1] if persisted is not None else None
+        effective_result = last_result if isinstance(last_result, Mapping) else persisted_result
+        view = project_economics(
+            self._config,
+            snapshot,
+            now=self._now(),
+            last_result=effective_result,
+        )
+        if view is None:  # pragma: no cover - caller checks configuration
+            raise RuntimeError("economic proposal was not configured")
+        if not isinstance(view.get("model"), Mapping):
+            view["model"] = {
+                "status": "not_run",
+                "candidate_id": None,
+                "citations": [],
+                "tool_trace": [],
+                "model_response": None,
+            }
+        if persisted is not None:
+            effect = persisted[0]
+            view["proposal_effect"] = _copy(effect)
+            view["selected_candidate_id"] = effect["candidate_id"]
+            candidates = view.get("candidates")
+            if isinstance(candidates, list):
+                for candidate in candidates:
+                    if (
+                        isinstance(candidate, dict)
+                        and candidate.get("candidate_id") == effect["candidate_id"]
+                    ):
+                        candidate["proposal_effect"] = _copy(effect)
+        self._mark_historical_economic_model(view, effective_result)
+        return view
+
+    def _persisted_economic_effect(
+        self,
+    ) -> tuple[dict[str, object], dict[str, object] | None] | None:
+        """Read one exact economic proposal from the existing approval journal.
+
+        The proposal journal is the authority for whether the already-selected
+        split event is still pending or has reached a native terminal outcome.
+        No model result or approval state is written here.
+        """
+
+        configured = cast(Mapping[str, object], self._config["economic_proposal"])
+        configured_event = cast(Mapping[str, object], configured["split20_event"])
+        expected_event = _encode(configured_event)
+        rows = self._db.execute(
+            "SELECT proposal_id, event_json, state_revision, result_json, manager_id, approved_at "
+            "FROM distributor_operation_proposals WHERE case_id=? "
+            "AND source='ECONOMIC_RECOMMENDATION' ORDER BY recorded_at DESC, rowid DESC",
+            (self._config["case_id"],),
+        ).fetchall()
+        for row in rows:
+            (
+                proposal_id,
+                event_json,
+                _state_revision,
+                result_json,
+                manager_id,
+                approved_at,
+            ) = cast(tuple[str, str, str, str | None, str | None, str | None], row)
+            if event_json != expected_event:
+                continue
+            event = _decoded(event_json, "economic proposal event")
+            event_id = _text(event.get("event_id"), "economic proposal event_id")
+            result = _decoded(result_json, "economic proposal result") if result_json else None
+            effect: dict[str, object] = {
+                "candidate_id": SPLIT20_CANDIDATE_ID,
+                "proposal_id": proposal_id,
+                "event_id": event_id,
+                "quantity": _wire(_quantity(event.get("quantity"), "economic proposal quantity")),
+                "status": (
+                    self._stored_event_status(event) or "UNKNOWN_OUTCOME"
+                    if result_json is not None
+                    else "PENDING_MANAGER_APPROVAL"
+                ),
+            }
+            if manager_id is not None and approved_at is not None:
+                effect["approval"] = {"manager_id": manager_id, "approved_at": approved_at}
+            documents = self._economic_event_documents(event_id)
+            if documents:
+                effect["native_documents"] = documents
+            return effect, self._confirmation_economic_result(result, proposal_id)
+        return None
+
+    def _economic_event_documents(self, event_id: str) -> list[dict[str, object]]:
+        """Return document references emitted by this exact completed event."""
+
+        row = self._db.execute(
+            "SELECT result_json FROM distributor_operation_events WHERE event_id=?", (event_id,)
+        ).fetchone()
+        if row is None or row[0] is None:
+            return []
+        projection = _decoded(cast(str, row[0]), "economic event result")
+        events = projection.get("events")
+        if not isinstance(events, list):
+            return []
+        for record in events:
+            if not isinstance(record, Mapping) or record.get("event_id") != event_id:
+                continue
+            operations = record.get("operations")
+            if not isinstance(operations, list):
+                return []
+            return _merge_documents(
+                *[
+                    _documents(operation.get("documents"))
+                    for operation in operations
+                    if isinstance(operation, Mapping)
+                ]
+            )
+        return []
+
+    @staticmethod
+    def _confirmation_economic_result(
+        result: Mapping[str, object] | None, proposal_id: str
+    ) -> dict[str, object] | None:
+        """Recover the pre-dispatch decision only when the journal binds it to this proposal."""
+
+        if not isinstance(result, Mapping):
+            return None
+        economic = result.get("economic_proposal")
+        if not isinstance(economic, Mapping):
+            return None
+        last_result = economic.get("last_result")
+        if (
+            not isinstance(last_result, Mapping)
+            or last_result.get("prepared_proposal_id") != proposal_id
+        ):
+            return None
+        return _copy(last_result)
+
+    @staticmethod
+    def _mark_historical_economic_model(
+        view: dict[str, object], last_result: Mapping[str, object] | None
+    ) -> None:
+        """Label a prior model trace when current operational evidence has changed."""
+
+        if not isinstance(last_result, Mapping):
+            return
+        prior_evidence_id = last_result.get("source_evidence_id")
+        evidence = view.get("evidence")
+        operational = (
+            evidence.get("operational_snapshot") if isinstance(evidence, Mapping) else None
+        )
+        current_evidence_id = (
+            operational.get("evidence_id") if isinstance(operational, Mapping) else None
+        )
+        if not (
+            isinstance(prior_evidence_id, str)
+            and prior_evidence_id
+            and isinstance(current_evidence_id, str)
+            and current_evidence_id
+            and prior_evidence_id != current_evidence_id
+            and isinstance(view.get("model"), Mapping)
+        ):
+            return
+        model = cast(dict[str, object], _copy(view["model"]))
+        prior_status = model.get("status")
+        decision = model.get("decision")
+        model.update(
+            {
+                "status": "HISTORICAL",
+                "historical": True,
+                "source_evidence_id": prior_evidence_id,
+                "current_source_evidence_id": current_evidence_id,
+                "decision": (
+                    f"Historical pre-dispatch model decision: {decision}"
+                    if isinstance(decision, str) and decision.strip()
+                    else (
+                        "Historical pre-dispatch model decision; "
+                        "current operational evidence changed."
+                    )
+                ),
+            }
+        )
+        if isinstance(prior_status, str) and prior_status.strip():
+            model["prior_status"] = prior_status.strip()
+        view["model"] = model
+
+    def _economic_result(
+        self,
+        *,
+        candidate_id: str | None,
+        snapshot: Mapping[str, object],
+        selector_result: Mapping[str, object],
+        gate: Mapping[str, object],
+    ) -> dict[str, object]:
+        selected = selector_result.get("candidate_id")
+        return {
+            "requested_candidate_id": candidate_id,
+            "model": _copy(selector_result),
+            "gate": _copy(gate),
+            "advice_disagrees_with_selection": (
+                candidate_id is not None
+                and isinstance(selected, str)
+                and selected not in {candidate_id, DEFER_CANDIDATE_ID}
+            ),
+            "source_evidence_id": raw_economic_evidence(self._config, snapshot)[
+                "operational_snapshot"
+            ]["evidence_id"],
+        }
+
+    def _economic_proposal_id(self, event_id: str) -> str:
+        """Reuse a stable proposal identity; no economic decision store is introduced."""
+
+        digest = economic_config_digest(self._config) or "no-economic-config"
+        identity = _encode(
+            {"case_id": self._config["case_id"], "event_id": event_id, "economics": digest}
+        )
+        return "economic-" + sha256(identity.encode()).hexdigest()[:32]
+
     def _validate_config(self, config: Mapping[str, object]) -> dict[str, object]:
         normalized = cast(dict[str, object], _copy(config))
         for field in (
@@ -1306,6 +1715,7 @@ class DistributorOperations:
             validate_contract_config(normalized)
         except ContractAllocationError as error:
             raise ValueError(str(error)) from error
+        validate_economic_config(normalized)
         if contract_mode(normalized):
             for row in allocations:
                 row["promised_delivery_at"] = _utc(
@@ -3590,6 +4000,10 @@ class DistributorOperations:
             self._mark_current_projection(result, source)
         else:
             self._mark_unavailable_projection(result)
+        if self._config.get("economic_proposal") is not None:
+            result["economic_proposal"] = self._economic_view(
+                self._economic_operational_snapshot(state, source), self._economic_last_result
+            )
         return result
 
     @classmethod
@@ -3681,6 +4095,7 @@ class DistributorOperations:
                     "case_id": self._config["case_id"],
                     "state": state,
                     "source": source,
+                    "economic_config_digest": economic_config_digest(self._config),
                 }
             ).encode("utf-8")
         ).hexdigest()

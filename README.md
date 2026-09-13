@@ -1,6 +1,8 @@
 # LogisticPilot
 
-Current release evidence: [PO20 claim manifest](docs/submission/current-claim-manifest.md) · [strict judge review](docs/audits/2026-09-13-award-readiness.md). These distinguish historical native execution from today's retained review; older 20-unit invoice and multi-agent results are separate cases.
+Newest acceptance: [economic decision → ERP dispatch](docs/audits/2026-09-13-economic-poc-acceptance.md). An isolated 25-unit order now has a real Bedrock comparison and an approved 20-unit native ERP dispatch, with 5 units still held. The $24.80 postage difference is a conditional estimate, not realized savings.
+
+Earlier release evidence: [PO20 claim manifest](docs/submission/current-claim-manifest.md) · [strict judge review](docs/audits/2026-09-13-award-readiness.md). Older invoice and multi-agent results remain separate cases.
 
 > **September 13 current status:** The retained PO20 review and real Claude Opus
 > 4.6 application answers are verified in the isolated workspace. Historical ERP
@@ -10,7 +12,7 @@ Current release evidence: [PO20 claim manifest](docs/submission/current-claim-ma
 
 
 
-**Investigate exceptions. Protect stock. Keep eligible orders moving.**
+**An AI order desk for small distributors: resolve delivery exceptions, keep orders moving, and avoid unnecessary costs.**
 
 LogisticPilot helps parts distributors turn one receiving exception into a
 reviewable fulfillment workflow. Operators record carton, quantity, lot, and
@@ -21,7 +23,7 @@ while deterministic code owns quantities, authority, ERP effects, and readback.[
 code package names, environment variables, case IDs, and runtime database names
 retain the former name for traceability.
 
-The current demonstration follows isolated case
+The retained PO20 demonstration follows isolated case
 `M20-DIST-COMPONENT-V2-20260910` on `PUR-ORD-2026-00020`: 40 parts ordered,
 received, and dispatched. LOT-A20 records 20 parts; LOT-B18 records 18 of 20 after a
 two-part shortage and sample failure, then passes a whole-lot retest; LOT-C2 records
@@ -30,6 +32,15 @@ customer commitments A25 and B15. Delivery confirmations are synthetic demo inpu
 not independent proof that customers physically received the parts. The PO is USD160;
 customer orders are USD150 and USD90; no invoice, payment, or revenue-recognition
 claim is made.
+
+The new economic demonstration uses `LP-POC-COST-01`, mapped to isolated runtime
+case `M20-DIST-ECONOMIC-ECON-20260913`, PO23 and SO17. Its 25-unit synthetic order
+compares sending 20 qualified parts now and 5 later against waiting for all 25.
+Real Strands/Bedrock calls read contract, quality, rate and stock evidence; the
+operator's supported choice passes through the existing approval and ERP executor.
+The verified result is 20 units recorded as dispatched in ERP and 5 held, with no
+carrier booking or payment. Consolidating all 25 remains advice only. See the
+[evidence packet](docs/demo-data/economic-poc/README.md) and acceptance audit.
 
 ## Why this needs an agent
 

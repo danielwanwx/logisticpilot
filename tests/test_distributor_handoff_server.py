@@ -50,6 +50,7 @@ class Operations:
         self.events: list[dict[str, object]] = []
         self.reconciliations: list[str] = []
         self.questions: list[str] = []
+        self.economic_requests: list[dict[str, object]] = []
 
     def projection(self) -> dict[str, object]:
         return deepcopy(self.current)
@@ -65,6 +66,20 @@ class Operations:
     def approve_event_proposal(self, request: dict[str, object]) -> dict[str, object]:
         self.events.append(request)
         return deepcopy(self.current)
+
+    def prepare_economic_proposal(self, request: dict[str, object]) -> dict[str, object]:
+        self.economic_requests.append(request)
+        projection = deepcopy(self.current)
+        projection["economic_proposal"] = {
+            "status": "CURRENT",
+            "selected_candidate_id": request.get("selected_candidate_id"),
+            "candidates": [{"candidate_id": "split20", "executable": True}],
+            "model": {"status": "not_run"},
+        }
+        return {
+            "economic_proposal": {"requested_candidate_id": request.get("selected_candidate_id")},
+            "projection": projection,
+        }
 
     def ask(self, question: str) -> dict[str, object]:
         self.questions.append(question)
@@ -176,6 +191,22 @@ def test_get_and_ask_only_return_retained_handoffs_without_syncing() -> None:
     assert outbound.calls == []
     assert operations.questions == ["What changed?"]
     assert len(cast(list[object], result(sent)["handoffs"])) == 2
+
+
+def test_economic_prepare_is_a_local_prepare_route_with_the_stable_request_shape() -> None:
+    operations, outbound = Operations(), Handoff()
+    current, sent = handler(operations, outbound)
+    request = {"case_id": "M20-DIST-HANDOFF-A", "selected_candidate_id": "split20"}
+
+    current._v1_post("/api/v1/distributor-operations/prepare-economic-proposal", request)
+
+    assert operations.economic_requests == [request]
+    assert outbound.calls == []
+    response = result(sent)
+    assert response["case_id"] == "M20-DIST-HANDOFF-A"
+    economic = cast(dict[str, object], response["economic_proposal"])
+    assert economic["selected_candidate_id"] == "split20"
+    assert economic["candidates"] == [{"candidate_id": "split20", "executable": True}]
 
 
 def test_provider_failure_keeps_the_erp_response_and_retained_failure_visible() -> None:

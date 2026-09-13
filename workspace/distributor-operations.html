@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/assets/phosphor-regular.css" />
     <link rel="stylesheet" href="/assets/phosphor-bold.css" />
     <link rel="stylesheet" href="/style.css?v=source-driven-final-v32" />
-    <link rel="stylesheet" href="/distributor-operations.css?v=20260912-reference-adaptation-v1" />
+    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-economic-ui-v3" />
     <title>LogisticPilot</title>
   </head>
   <body class="operations-shell" data-operations-state="loading" data-ops-view="dashboard">
@@ -30,7 +30,7 @@
         <a class="view-tab" data-ops-view-link="operations" href="/operations?view=operations"><i class="ph ph-package" aria-hidden="true"></i><span>Operations</span></a>
       </nav>
       <div class="topbar-context">
-        <span class="header-incident-state">PO20 / DEMO</span>
+        <span id="ops-header-incident-state" class="header-incident-state">Operation loading</span>
         <div class="connection-control" aria-live="polite">
           <span id="ops-connection-dot" class="status-dot status-dot-cyan" aria-hidden="true"></span>
           <span id="ops-connection-label">Connecting</span>
@@ -118,6 +118,43 @@
             <p id="ops-overview-copy" class="ops-panel-copy">Same-case records into the Investigation view and manager gate.</p>
             <div id="ops-overview-graph" class="ops-overview-graph" aria-label="Cross-system operation graph"></div>
             <div class="ops-overview-links"><a id="ops-alert-focus-link" href="#ops-alerts-panel">Focus active alert</a><a href="#ops-chat-panel">Ask the read-only agent</a><a href="#ops-evidence-panel">Review manager gate</a></div>
+          </section>
+
+          <section id="ops-economic-panel" class="ops-panel ops-economic-panel" aria-labelledby="ops-economic-title" hidden>
+            <header class="ops-panel-header ops-economic-header">
+              <div>
+                <span class="object-label">Economic decision</span>
+                <h2 id="ops-economic-title">Keep the order moving</h2>
+                <p id="ops-economic-subtitle" class="ops-economic-subtitle">Compare dispatch paths against the current order evidence.</p>
+              </div>
+              <div class="ops-economic-badges">
+                <span id="ops-economic-status" class="state-badge state-neutral">Status unavailable</span>
+                <span class="ops-synthetic-badge"><i class="ph ph-flask" aria-hidden="true"></i>Synthetic POC</span>
+                <span class="ops-synthetic-badge"><i class="ph ph-receipt" aria-hidden="true"></i>Postage estimate</span>
+              </div>
+            </header>
+            <div id="ops-economic-selection" class="ops-economic-selection" aria-live="polite"></div>
+            <div id="ops-economic-candidates" class="ops-economic-candidates" aria-label="Economic dispatch candidates"></div>
+            <div id="ops-economic-difference" class="ops-economic-difference" hidden></div>
+            <div class="ops-economic-actions">
+              <button id="ops-economic-compare" class="button button-quiet" type="button"><i class="ph ph-chat-circle-dots" aria-hidden="true"></i>Compare with agent</button>
+              <span id="ops-economic-feedback" class="ops-feedback" role="status" aria-live="polite"></span>
+            </div>
+            <section class="ops-economic-evidence" aria-labelledby="ops-economic-evidence-title">
+              <div class="ops-economic-subheader"><span id="ops-economic-evidence-title" class="object-label">Decision evidence</span><button id="ops-economic-open-evidence" class="ops-text-button" type="button">Open evidence drawer</button></div>
+              <div id="ops-economic-sources" class="ops-economic-sources" aria-live="polite"></div>
+            </section>
+            <section class="ops-economic-model" aria-labelledby="ops-economic-model-title">
+              <div class="ops-economic-subheader"><span id="ops-economic-model-title" class="object-label">Agent recommendation</span><span id="ops-economic-model-identity" class="ops-count-label">Model unavailable</span></div>
+              <p id="ops-economic-model-decision" class="ops-economic-model-decision">Decision unavailable from the source.</p>
+              <p id="ops-economic-model-note" class="ops-economic-model-note" hidden></p>
+              <div id="ops-economic-model-citations" class="ops-economic-citations" aria-label="Model citations"></div>
+              <details id="ops-economic-model-trace" class="ops-economic-trace" hidden><summary>View evidence reads</summary><pre id="ops-economic-model-trace-value"></pre></details>
+            </section>
+            <section class="ops-economic-gate" aria-labelledby="ops-economic-gate-title">
+              <div class="ops-economic-subheader"><span id="ops-economic-gate-title" class="object-label">Dispatch checks</span><span id="ops-economic-gate-status" class="state-badge state-neutral">Status unavailable</span></div>
+              <div id="ops-economic-gate-details" class="ops-economic-gate-details"></div>
+            </section>
           </section>
 
           <section id="ops-chat-panel" class="ops-panel ops-chat-panel" aria-labelledby="ops-chat-title">
@@ -241,6 +278,6 @@
       <div id="ops-evidence-drawer-facts" class="ops-evidence-drawer-facts" aria-live="polite"></div>
       <button id="ops-evidence-drawer-open-operations" class="button button-primary" type="button">Open full operations evidence</button>
     </aside>
-    <script src="/distributor-operations.js?v=20260912-reference-adaptation-v1"></script>
+    <script src="/distributor-operations.js?v=20260913-economic-ui-v3"></script>
   </body>
 </html>

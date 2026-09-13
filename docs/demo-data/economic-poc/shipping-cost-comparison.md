@@ -6,7 +6,13 @@ Case: `LP-POC-COST-01`
 
 Customer: **Demo Parts Customer A**
 
-Scope: same fictional US domestic address ID `DEMO-US-DEST-A` (not an actual street) and 25-unit total in both candidates. Evaluation snapshot: 2026-09-13 09:00 America/Los_Angeles; latest agreed dispatch: 2026-09-14 15:00 America/Los_Angeles (dispatch, not arrival).
+Scope: same fictional US domestic address ID `DEMO-US-DEST-A` (not an actual
+street), same customer, and 25-unit total in both candidates. Evaluation
+snapshot: 2026-09-13 09:00 America/Los_Angeles. The first dispatch deadline is
+2026-09-14 15:00 America/Los_Angeles for at least 10 units; if split, the final
+5 must dispatch by 2026-09-16 15:00 America/Los_Angeles; if consolidated, all 25
+must dispatch by 2026-09-14 15:00 America/Los_Angeles. These are dispatch
+deadlines, not arrival guarantees.
 
 ## Rate and packaging assumption
 
@@ -27,14 +33,14 @@ verified.
 
 | Candidate | Dispatches | Postage-only estimate |
 | --- | --- | ---: |
-| Split | 20 now + 5 later = 2 boxes | 2 × $24.80 = **$49.60** |
-| Consolidated | 25 after release = 1 box | 1 × $24.80 = **$24.80** |
+| Split | 20 by Sep 14 deadline + 5 by Sep 16 deadline = 2 boxes | 2 × $24.80 = **$49.60** |
+| Consolidated | 25 by Sep 14 deadline, if released = 1 box | 1 × $24.80 = **$24.80** |
 
 Estimated delta: **$24.80** lower for consolidation (postage only).
 
 This is an estimate, not real paid savings. Extra services, surcharges, taxes,
 and any non-USPS costs are excluded. No shipment is booked. [USPS Priority Mail delivery time is not guaranteed](https://pe.usps.com/text/dmm300/123.htm).
 
-Consolidation remains conditional on the unconfirmed release of the remaining 5
-through future quality release or stock by that dispatch deadline. There is no
-confirmed fulfillment saving yet.
+Consolidation remains conditional on the unknown release time of the remaining 5
+through future quality release or stock by the Sep 14 dispatch deadline. There is
+no confirmed fulfillment saving, late penalty, or guaranteed total completion.

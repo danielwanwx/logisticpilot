@@ -22,6 +22,12 @@
   and simulated savings; keep actual model calls and ERP execution real.
   Real customer paperwork is not a prerequisite for this demo. Do not mistake
   synthetic business inputs for permission to mock the agent or backend.
+- The user explicitly authorizes sending business evidence from this POC's
+  connected ERP and other demo systems to the existing AWS Bedrock integration
+  for agent analysis and end-to-end verification. These sources are part of the
+  intended connected demo ecosystem. Reuse this authorization for the same scope;
+  do not repeatedly ask whether the demo ERP evidence may be sent to Bedrock.
+  This does not require sending credentials or changing platform security controls.
 
 ## Competition demo priority (user steering, September 9)
 

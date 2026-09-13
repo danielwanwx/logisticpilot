@@ -195,6 +195,436 @@
     return Boolean(!resetFields && currentType && nextType && currentType === nextType && fieldsRendered);
   }
 
+  function normalizeEconomicProposal(value) {
+    if (!isRecord(value)) return null;
+    return {
+      ...value,
+      status: text(value.status).toUpperCase(),
+      selected_candidate_id: text(value.selected_candidate_id),
+      candidates: Array.isArray(value.candidates) ? value.candidates.filter(isRecord) : [],
+      source_evidence: Array.isArray(value.source_evidence) ? value.source_evidence.filter(isRecord) : [],
+      model: isRecord(value.model) ? { ...value.model } : {},
+      deterministic_gate: isRecord(value.deterministic_gate) ? { ...value.deterministic_gate } : {},
+    };
+  }
+
+  function economicProposalFrom(value) {
+    return normalizeEconomicProposal(value?.economic_proposal);
+  }
+
+  function economicNumber(...values) {
+    for (const value of values) {
+      const number = numberFrom(value);
+      if (finite(number)) return number;
+    }
+    return null;
+  }
+
+  function economicSnapshotValues(next, proposal) {
+    const quantities = isRecord(next?.quantities) ? next.quantities : {};
+    const gate = isRecord(proposal?.deterministic_gate) ? proposal.deterministic_gate : {};
+    const stock = isRecord(gate.stock_snapshot) ? gate.stock_snapshot : {};
+    return {
+      ordered: economicNumber(
+        proposal?.ordered_quantity,
+        proposal?.order_quantity,
+        proposal?.total_quantity,
+        quantities.ordered,
+        stock.ordered_quantity,
+        stock.ordered,
+        stock.total_quantity,
+        stock.total,
+      ),
+      ready: economicNumber(
+        proposal?.ready_quantity,
+        proposal?.ready_now_quantity,
+        proposal?.ready_now,
+        proposal?.available_now,
+        quantities.usable,
+        quantities.available,
+        stock.ready_quantity,
+        stock.ready,
+        stock.ready_now,
+        stock.available_now,
+        stock.usable,
+        stock.available,
+      ),
+      dispatched: economicNumber(
+        proposal?.dispatched_quantity,
+        quantities.dispatched,
+        quantities.dispatched_quantity,
+        stock.dispatched_quantity,
+        stock.dispatched,
+      ),
+      awaiting_release: economicNumber(
+        proposal?.awaiting_release_quantity,
+        proposal?.awaiting_release,
+        proposal?.awaiting_release_units,
+        proposal?.unreleased_quantity,
+        proposal?.not_released_quantity,
+        proposal?.held_quantity,
+        proposal?.missing_quantity,
+        proposal?.release_pending_quantity,
+        quantities.held,
+        quantities.missing,
+        stock.awaiting_release_quantity,
+        stock.awaiting_release,
+        stock.awaiting_release_units,
+        stock.unreleased_quantity,
+        stock.not_released_quantity,
+        stock.release_pending_quantity,
+        stock.held,
+        stock.held_quantity,
+        stock.missing,
+      ),
+    };
+  }
+
+  function economicValueText(value, fallback = "Unavailable") {
+    if (finite(value)) return formatNumber(value);
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (typeof value === "string") return text(value) || fallback;
+    if (Array.isArray(value)) {
+      const values = value.map((item) => economicValueText(item, "")).filter(Boolean);
+      return values.length ? values.join(" · ") : fallback;
+    }
+    if (isRecord(value)) {
+      const label = firstText(value, ["label", "title", "summary", "message", "reason", "value"]);
+      if (label) return label;
+      try {
+        const encoded = JSON.stringify(value);
+        return encoded || fallback;
+      } catch (_) { return fallback; }
+    }
+    return fallback;
+  }
+
+  function economicQuantityText(value) {
+    if (finite(value)) return formatNumber(value);
+    if (typeof value === "string") return text(value) || "Quantity unavailable";
+    if (Array.isArray(value)) {
+      const values = value.map((item) => economicQuantityText(item)).filter((item) => item !== "Quantity unavailable");
+      return values.length ? values.join(" · ") : "Quantity unavailable";
+    }
+    if (!isRecord(value)) return "Quantity unavailable";
+    const amount = numberFrom(value);
+    if (finite(amount)) {
+      const unit = firstText(value, ["uom", "unit", "unit_label", "units_label"]);
+      return `${formatNumber(amount)}${unit ? ` ${unit}` : ""}`;
+    }
+    const entries = Object.entries(value)
+      .map(([key, item]) => {
+        const number = numberFrom(item);
+        return finite(number) ? `${pretty(key)} ${formatNumber(number)}` : "";
+      })
+      .filter(Boolean);
+    return entries.length ? entries.join(" · ") : economicValueText(value, "Quantity unavailable");
+  }
+
+  function economicPostageDetails(candidate) {
+    const estimate = isRecord(candidate?.estimated_postage) ? candidate.estimated_postage : {};
+    const amount = numberFrom(estimate.amount);
+    const currency = text(estimate.currency);
+    const label = firstText(estimate, ["label", "description", "service"]);
+    const sourceRef = firstText(estimate, ["source_ref", "source_id", "ref", "url", "href"]);
+    const amountText = finite(amount)
+      ? [currency, economicAmountText(amount)].filter(Boolean).join(" ")
+      : "Estimate unavailable";
+    return { amount, currency, label, sourceRef, amountText };
+  }
+
+  function economicAmountText(value) {
+    return finite(value)
+      ? value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : "Amount unavailable";
+  }
+
+  function economicPostageDifference(proposal) {
+    const supplied = [proposal?.estimated_postage_difference, proposal?.postage_difference, proposal?.economic_difference]
+      .find((value) => isRecord(value) && finite(numberFrom(value.amount)) && text(value.currency));
+    if (supplied) return { amount: numberFrom(supplied.amount), currency: text(supplied.currency) };
+    const candidates = Array.isArray(proposal?.candidates) ? proposal.candidates : [];
+    const details = candidates.map(economicPostageDetails);
+    if (details.length < 2 || details.some((item) => !finite(item.amount) || !item.currency)) return null;
+    const currency = details[0].currency;
+    if (details.some((item) => item.currency.toUpperCase() !== currency.toUpperCase())) return null;
+    const amount = Math.abs(details[0].amount - details[1].amount);
+    return { amount, currency };
+  }
+
+  function economicStatusTone(status) {
+    const value = text(status).toUpperCase();
+    if (value === "PREPARED") return "lime";
+    if (value === "DEFERRED" || value === "NEEDS_EVIDENCE") return "amber";
+    if (/ERROR|FAILED|UNAVAILABLE/.test(value)) return "coral";
+    return value ? "cyan" : "neutral";
+  }
+
+  function economicCandidateState(candidate) {
+    if (candidate?.executable === true) return { label: "Executable", tone: "lime" };
+    if (candidate?.executable === false) return { label: "Conditional", tone: "amber" };
+    return { label: "Status unavailable", tone: "neutral" };
+  }
+
+  function economicConditionsText(value) {
+    if (Array.isArray(value)) {
+      const conditions = value.map((item) => economicConditionsText(item)).filter(Boolean);
+      return conditions.length ? conditions.join(" · ") : "Conditions unavailable from source.";
+    }
+    if (isRecord(value)) {
+      return firstText(value, ["label", "title", "summary", "message", "reason", "requirement"])
+        || economicValueText(value, "Conditions unavailable from source.");
+    }
+    return economicValueText(value, "Conditions unavailable from source.");
+  }
+
+  function economicStructuredText(value, fallback = "Unavailable from source.") {
+    if (typeof value === "string") return text(value) || fallback;
+    if (finite(value) || typeof value === "boolean") return economicValueText(value, fallback);
+    if (Array.isArray(value) || isRecord(value)) {
+      try {
+        const encoded = JSON.stringify(value);
+        return encoded || fallback;
+      } catch (_) { return fallback; }
+    }
+    return fallback;
+  }
+
+  function economicDateText(value, fallback = "Unavailable from source.") {
+    const raw = text(value);
+    if (!raw || !Number.isFinite(Date.parse(raw))) return economicValueText(value, fallback);
+    try {
+      return new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Los_Angeles",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZoneName: "short",
+      }).format(new Date(raw));
+    } catch (_) {
+      return economicValueText(value, fallback);
+    }
+  }
+
+  function economicSnapshotText(value, fallback = "Unavailable from source.") {
+    if (!isRecord(value)) return economicValueText(value, fallback);
+    const parts = [];
+    if (Array.isArray(value.lots)) {
+      const lotSummaries = value.lots.map((lot) => {
+        if (!isRecord(lot)) return "";
+        const name = firstText(lot, ["lot", "name", "id"]) || "Lot";
+        const usable = numberFromKeys(lot, ["usable", "usable_quantity", "available"]);
+        const held = numberFromKeys(lot, ["held", "held_quantity", "on_hold"]);
+        const quantity = numberFromKeys(lot, ["quantity", "received", "expected_quantity"]);
+        const details = [
+          finite(usable) ? `usable ${formatNumber(usable)}` : "",
+          finite(held) ? `held ${formatNumber(held)}` : "",
+          !finite(usable) && !finite(held) && finite(quantity) ? `quantity ${formatNumber(quantity)}` : "",
+          firstText(lot, ["status"]) ? pretty(firstText(lot, ["status"])) : "",
+        ].filter(Boolean);
+        return `${name}${details.length ? ` · ${details.join(" · ")}` : ""}`;
+      }).filter(Boolean);
+      if (lotSummaries.length) parts.push(`Lots: ${lotSummaries.join("; ")}`);
+      else {
+        const aggregateUsable = value.lots.reduce((total, lot) => total + (isRecord(lot) ? (numberFromKeys(lot, ["usable", "usable_quantity", "available"]) || 0) : 0), 0);
+        const aggregateHeld = value.lots.reduce((total, lot) => total + (isRecord(lot) ? (numberFromKeys(lot, ["held", "held_quantity", "on_hold"]) || 0) : 0), 0);
+        if (aggregateUsable || aggregateHeld) parts.push(`Lots: usable ${formatNumber(aggregateUsable)} · held ${formatNumber(aggregateHeld)}`);
+      }
+    }
+    if (Array.isArray(value.allocations)) {
+      const allocationSummaries = value.allocations.map((allocation) => {
+        if (!isRecord(allocation)) return "";
+        const order = firstText(allocation, ["customer_order", "order", "order_id"]) || "Order";
+        const requested = numberFromKeys(allocation, ["requested_quantity", "requested", "quantity"]);
+        const allocated = numberFromKeys(allocation, ["allocated", "allocated_quantity", "ready_quantity"]);
+        const details = [
+          finite(allocated) ? `allocated ${formatNumber(allocated)}` : "",
+          finite(requested) ? `requested ${formatNumber(requested)}` : "",
+        ].filter(Boolean);
+        return `${order}${details.length ? ` · ${details.join(" · ")}` : ""}`;
+      }).filter(Boolean);
+      if (allocationSummaries.length) parts.push(`Allocations: ${allocationSummaries.join("; ")}`);
+    }
+    const fields = [
+      ["status", "Status"],
+      ["quantity", "Quantity"],
+      ["ordered_quantity", "Ordered"],
+      ["ready_quantity", "Ready"],
+      ["ready_now", "Ready now"],
+      ["available_now", "Available now"],
+      ["awaiting_release_quantity", "Awaiting release"],
+      ["awaiting_release", "Awaiting release"],
+      ["unreleased_quantity", "Unreleased"],
+      ["held_quantity", "Held"],
+      ["missing_quantity", "Missing"],
+      ["released_quantity", "Released"],
+      ["partial_dispatch_allowed", "Partial dispatch"],
+      ["minimum_dispatch_quantity", "Minimum dispatch"],
+      ["final_remainder_allowed", "Final remainder"],
+      ["consolidation_allowed", "Consolidation"],
+      ["partial_dispatch", "Partial dispatch"],
+      ["final_remainder", "Final remainder"],
+      ["available", "Available"],
+      ["release_status", "Release"],
+      ["split_first_dispatch_deadline", "First dispatch deadline"],
+      ["split_final_dispatch_deadline", "Tail dispatch deadline"],
+      ["consolidated_dispatch_deadline", "Consolidation deadline"],
+      ["partial_minimum_quantity", "Partial minimum"],
+      ["customer_order", "Customer order"],
+      ["destination_id", "Destination"],
+      ["deadline_status", "Deadline status"],
+      ["release_time", "Release time"],
+      ["deadline", "Deadline"],
+      ["checked_at", "Checked at"],
+      ["source_as_of", "Source as of"],
+      ["as_of", "As of"],
+      ["at", "At"],
+    ];
+    for (const [key, label] of fields) {
+      const valueText = [
+        "split_first_dispatch_deadline",
+        "split_final_dispatch_deadline",
+        "consolidated_dispatch_deadline",
+        "release_time",
+        "deadline",
+        "checked_at",
+        "source_as_of",
+        "as_of",
+        "at",
+      ].includes(key)
+        ? economicDateText(value[key], "")
+        : economicValueText(value[key], "");
+      if (valueText) parts.push(`${label}: ${valueText}`);
+    }
+    if (parts.length) return parts.join(" · ");
+    return firstText(value, ["label", "title", "summary", "message", "reason"]) || fallback;
+  }
+
+  function economicSourceEntries(proposal) {
+    return Array.isArray(proposal?.source_evidence) ? proposal.source_evidence.filter(isRecord) : [];
+  }
+
+  function economicEffectReadback(proposal, next) {
+    const effect = isRecord(proposal?.proposal_effect) ? proposal.proposal_effect : {};
+    return [
+      effect.native_readback,
+      effect.native_result,
+      effect.readback,
+      effect.native_operation,
+      effect.result,
+      next?.native_readback,
+      next?.native_result,
+    ].find(isRecord) || null;
+  }
+
+  function economicPreparedProposalMatches(effect, next) {
+    const prepared = isRecord(next?.prepared_proposal) ? next.prepared_proposal : null;
+    if (!prepared) return false;
+    const proposalId = firstText(effect, ["proposal_id"]);
+    const eventId = firstText(effect, ["event_id"]);
+    const candidateId = firstText(effect, ["candidate_id"]);
+    const preparedProposalId = firstText(prepared, ["proposal_id"]);
+    const preparedEventId = firstText(prepared.event, ["event_id"]);
+    const preparedCandidateId = firstText(prepared, ["candidate_id"])
+      || firstText(prepared.event, ["candidate_id"]);
+    if (proposalId && preparedProposalId !== proposalId) return false;
+    if (eventId && preparedEventId !== eventId) return false;
+    if (candidateId && preparedCandidateId && preparedCandidateId !== candidateId) return false;
+    return Boolean(
+      (proposalId && preparedProposalId)
+      || (eventId && preparedEventId)
+      || (candidateId && preparedCandidateId),
+    );
+  }
+
+  function economicEffectStatus(proposal, next) {
+    const effect = isRecord(proposal?.proposal_effect) ? proposal.proposal_effect : {};
+    const readback = economicEffectReadback(proposal, next);
+    const readbackStatus = firstText(readback, ["status", "state", "outcome"]).toUpperCase();
+    const effectStatus = firstText(effect, ["status", "state", "outcome"]).toUpperCase();
+    const preparedStatus = firstText(next?.prepared_proposal, ["status", "state"]).toUpperCase();
+    const preparedMatches = economicPreparedProposalMatches(effect, next);
+    if (/^(APPLIED|ALREADY_APPLIED)$/.test(readbackStatus)) return readbackStatus;
+    if (/^(APPLIED|ALREADY_APPLIED)$/.test(effectStatus)) return effectStatus;
+    if (preparedMatches && /^(APPLIED|ALREADY_APPLIED)$/.test(preparedStatus)) return preparedStatus;
+    return effectStatus || readbackStatus || (preparedMatches ? preparedStatus : "");
+  }
+
+  function economicEffectQuantity(proposal, next) {
+    const effect = isRecord(proposal?.proposal_effect) ? proposal.proposal_effect : {};
+    const readback = economicEffectReadback(proposal, next);
+    return economicNumber(
+      effect.quantity,
+      effect.applied_quantity,
+      effect.dispatched_quantity,
+      readback?.quantity,
+      readback?.applied_quantity,
+      readback?.dispatched_quantity,
+    );
+  }
+
+  function economicEffectSummary(proposal, next) {
+    const effect = isRecord(proposal?.proposal_effect) ? proposal.proposal_effect : {};
+    const readback = economicEffectReadback(proposal, next);
+    const status = economicEffectStatus(proposal, next);
+    const quantity = economicEffectQuantity(proposal, next);
+    const eventId = firstText(effect, ["event_id"])
+      || firstText(readback, ["event_id", "record_id", "operation_id"])
+      || (economicPreparedProposalMatches(effect, next)
+        ? firstText(next?.prepared_proposal?.event, ["event_id"])
+        : "");
+    const nativeRecord = firstText(readback, ["record_id", "document_id", "shipment_id"]);
+    const approval = isRecord(effect.approval) ? effect.approval : {};
+    const approvedBy = economicPreparedProposalMatches(effect, next)
+      ? firstText(approval, ["manager_id"])
+      : "";
+    const approvedAt = economicPreparedProposalMatches(effect, next)
+      ? firstText(approval, ["approved_at"])
+      : "";
+    const nativeDocuments = Array.isArray(effect.native_documents)
+      ? effect.native_documents.filter(isRecord).map((document) => {
+        const name = firstText(document, ["name", "record_id", "id"]);
+        const kind = firstText(document, ["kind"]);
+        return [name || kind || "Native record", name && kind ? kind : ""]
+          .filter(Boolean)
+          .join(" ");
+      }).filter(Boolean)
+      : [];
+    const quantityLabel = finite(quantity)
+      ? /^(APPLIED|ALREADY_APPLIED)$/.test(status)
+        ? `${formatNumber(quantity)} dispatched`
+        : `${formatNumber(quantity)} planned`
+      : "";
+    const parts = [
+      /^(APPLIED|ALREADY_APPLIED)$/.test(status) ? `Native readback ${pretty(status)}` : status ? `Status ${pretty(status)}` : "",
+      quantityLabel,
+      eventId ? `Event ${eventId}` : "",
+      nativeRecord && nativeRecord !== eventId ? `Record ${nativeRecord}` : "",
+      approvedBy ? `Approved by ${approvedBy}` : "",
+      approvedAt ? `Approved at ${economicDateText(approvedAt)}` : "",
+      nativeDocuments.length ? `Execution-time native records ${nativeDocuments.join("; ")}` : "",
+      firstText(readback, ["message", "detail", "summary"]),
+    ].filter(Boolean);
+    return parts.join(" · ");
+  }
+
+  function economicModelIsStale(model) {
+    if (!isRecord(model)) return false;
+    const freshness = [
+      model.status,
+      model.freshness_status,
+      model.freshness,
+      model.model_freshness,
+      isRecord(model.freshness) ? model.freshness.status : "",
+    ].map((value) => text(value).toUpperCase());
+    return model.stale === true
+      || model.is_stale === true
+      || model.historical === true
+      || freshness.some((value) => value === "STALE" || value === "HISTORICAL");
+  }
+
   function normalizeProjection(value) {
     const source = isRecord(value) ? value : {};
     const provided = {
@@ -208,7 +638,7 @@
       financials: isRecord(source.financials),
       available_event_templates: Array.isArray(source.available_event_templates),
     };
-    return {
+    const normalized = {
       ...source,
       available: source.available === true,
       case_id: text(source.case_id),
@@ -228,6 +658,9 @@
         : isRecord(source.conversation) ? { ...source.conversation } : {},
       _provided: provided,
     };
+    const economic = normalizeEconomicProposal(source.economic_proposal);
+    if (economic) normalized.economic_proposal = economic;
+    return normalized;
   }
 
   function handoffFailureText(value) {
@@ -968,6 +1401,11 @@
     erpEvidenceSourceLabel,
     sourceAwareErpText,
     freshActionsAllowed,
+    normalizeEconomicProposal,
+    economicProposalFrom,
+    economicSnapshotValues,
+    economicPostageDetails,
+    economicPostageDifference,
     normalizeProjection,
     normalizeHandoffs,
     groupHandoffs,
@@ -1034,6 +1472,8 @@
   let pendingAllocationAction = null;
   let allocationFeedback = null;
   let preparedProposal = null;
+  let economicConfigured = false;
+  let preparingEconomic = false;
   let selectedPhoto = null;
   let photoPreviewUrl = "";
   let evidenceDrawerTrigger = null;
@@ -1145,11 +1585,33 @@
     return purchaseOrder ? firstText(purchaseOrder, ["name", "record_id", "id"]) : "";
   }
 
+  function directPurchaseOrderIdentifier(next) {
+    const purchaseOrder = next?.purchase_order;
+    if (typeof purchaseOrder === "string") return text(purchaseOrder);
+    if (isRecord(purchaseOrder)) return firstText(purchaseOrder, ["name", "record_id", "id", "purchase_order"]);
+    return firstText(next, ["purchase_order_id", "po_number", "po"]);
+  }
+
+  function purchaseOrderDisplay(next) {
+    const identifier = purchaseOrderIdentifier(next) || directPurchaseOrderIdentifier(next);
+    if (!identifier) return "";
+    return /^PO(?:\d|\s|-|$)/i.test(identifier) ? identifier : `PO ${identifier}`;
+  }
+
+  function renderHeaderIncidentState(next) {
+    const node = $("ops-header-incident-state");
+    if (!node) return;
+    const purchaseOrder = purchaseOrderDisplay(next);
+    if (purchaseOrder) node.textContent = purchaseOrder;
+    else if (economicConfigured && economicProposalFrom(next)) node.textContent = "SYNTHETIC POC";
+    else node.textContent = "Operation";
+  }
+
   function renderHero(next) {
     const unit = text(next?.quantities?.uom) || "units";
     const received = quantity(next, "received");
     const dispatched = quantity(next, "dispatched");
-    const purchaseOrder = purchaseOrderIdentifier(next);
+    const purchaseOrder = purchaseOrderDisplay(next);
     const available = next?.available === true;
     const title = !available
       ? "Operation facts unavailable"
@@ -1210,7 +1672,7 @@
     const confirmed = quantity(next, "delivery_confirmed");
     const photos = photoAttachmentList(next);
     const purchaseOrderRecordValue = purchaseOrderRecord(next);
-    const purchaseOrder = purchaseOrderIdentifier(next);
+    const purchaseOrder = purchaseOrderDisplay(next);
     setText("ops-evidence-drawer-status", evidenceStatusLabel(next));
     list.replaceChildren();
     appendEvidenceDrawerFact(list, "Case", next?.case_id || "Case identifier unavailable");
@@ -1233,6 +1695,345 @@
         latest.safe_url,
       );
     });
+    const proposal = economicProposalFrom(next);
+    if (economicConfigured && proposal) {
+      const sources = economicSourceEntries(proposal);
+      appendEvidenceDrawerFact(list, "Economic proposal", pretty(proposal.status || "Status unavailable"));
+      if (isRecord(proposal.proposal_effect)) {
+        const effect = Object.entries(proposal.proposal_effect)
+          .map(([key, value]) => `${pretty(key)} ${economicValueText(value, "")}`)
+          .filter((value) => !value.endsWith(" "))
+          .join(" · ");
+        if (effect) appendEvidenceDrawerFact(list, "Economic proposal effect", effect);
+      }
+      sources.forEach((source) => {
+        const label = firstText(source, ["label", "source_id"]) || "Economic source";
+        const detail = [
+          firstText(source, ["kind"]),
+          firstText(source, ["checked_at"]),
+          safeHref(firstText(source, ["ref", "url", "href"])) ? "" : firstText(source, ["ref", "url", "href"]),
+        ].filter(Boolean).join(" · ") || "Source reference recorded";
+        appendEvidenceDrawerFact(list, `Economic evidence · ${label}`, detail, firstText(source, ["ref", "url", "href"]));
+      });
+    }
+  }
+
+  function setEconomicFeedback(message, tone = "") {
+    const feedback = $("ops-economic-feedback");
+    if (!feedback) return;
+    feedback.className = `ops-feedback${tone ? ` is-${tone}` : ""}`;
+    feedback.textContent = message || "";
+  }
+
+  function renderEconomicSource(parent, source, index) {
+    const label = firstText(source, ["label", "source_id"]) || `Source ${index + 1}`;
+    const ref = firstText(source, ["ref", "url", "href"]);
+    const kind = firstText(source, ["kind"]);
+    const checkedAt = firstText(source, ["checked_at"]);
+    const badge = document.createElement("span"); badge.className = "ops-economic-source";
+    const icon = document.createElement("i"); icon.className = "ph ph-link-simple"; icon.setAttribute("aria-hidden", "true");
+    const detail = [kind, checkedAt, safeHref(ref) ? "" : ref].filter(Boolean).join(" · ");
+    const labelNode = safeHref(ref) ? document.createElement("a") : document.createElement("span");
+    labelNode.textContent = label;
+    if (safeHref(ref)) {
+      labelNode.href = safeHref(ref);
+      labelNode.target = "_blank";
+      labelNode.rel = "noopener noreferrer";
+      labelNode.title = ref;
+    }
+    badge.append(icon, labelNode);
+    if (detail) {
+      const detailNode = document.createElement("small"); detailNode.textContent = detail; badge.append(detailNode);
+    }
+    parent.append(badge);
+  }
+
+  function renderEconomicModel(proposal) {
+    const model = isRecord(proposal?.model) ? proposal.model : {};
+    const status = text(model.status).toUpperCase();
+    const provider = isRecord(model.provider) ? model.provider : {};
+    const usage = isRecord(model.usage) ? model.usage : {};
+    const stale = economicModelIsStale(model);
+    const identity = [
+      firstText(model, ["provider"]) || firstText(provider, ["provider"]),
+      firstText(model, ["model_id", "model"]) || firstText(provider, ["model", "model_id"]),
+      firstText(provider, ["region"]),
+      finite(numberFrom(usage.elapsed_ms)) ? `${formatNumber(numberFrom(usage.elapsed_ms))} ms` : "",
+    ].filter(Boolean).join(" · ");
+    setText("ops-economic-model-identity", [status ? pretty(status) : "Status unavailable", identity].filter(Boolean).join(" · ") || "Model unavailable");
+    setText("ops-economic-model-title", stale ? "Agent recommendation · prior snapshot" : "Agent recommendation");
+    setText("ops-economic-model-decision", economicValueText(model.decision, "Decision unavailable from the source."));
+    const note = $("ops-economic-model-note");
+    if (note) {
+      const notRun = status === "NOT_RUN";
+      note.hidden = !notRun && !stale;
+      note.textContent = notRun
+        ? "Model capabilities were not run for this proposal; the dispatch checks below remain source-provided."
+        : stale
+          ? "This recommendation is a prior snapshot; the current dispatch state is shown below."
+          : "";
+    }
+    const citations = $("ops-economic-model-citations");
+    if (citations) {
+      citations.replaceChildren();
+      const values = Array.isArray(model.citations)
+        ? model.citations
+        : model.citations == null ? [] : [model.citations];
+      values.forEach((citation, index) => {
+        const record = isRecord(citation) ? citation : {};
+        const label = firstText(record, ["label", "title", "source_id", "id"]) || economicValueText(citation, `Citation ${index + 1}`);
+        const ref = firstText(record, ["ref", "url", "href", "source_ref"]);
+        const badge = document.createElement("span"); badge.className = "ops-economic-citation";
+        const icon = document.createElement("i"); icon.className = "ph ph-quotes"; icon.setAttribute("aria-hidden", "true");
+        const labelNode = safeHref(ref) ? document.createElement("a") : document.createElement("span");
+        labelNode.textContent = label;
+        if (safeHref(ref)) {
+          labelNode.href = safeHref(ref);
+          labelNode.target = "_blank";
+          labelNode.rel = "noopener noreferrer";
+          labelNode.title = ref;
+        }
+        badge.append(icon, labelNode);
+        citations.append(badge);
+      });
+      if (!values.length) citations.append(emptyList("Model citations unavailable from the source."));
+    }
+    const trace = $("ops-economic-model-trace");
+    const traceValue = $("ops-economic-model-trace-value");
+    const hasTrace = model.trace !== undefined && model.trace !== null && economicStructuredText(model.trace, "") !== "";
+    if (trace && traceValue) {
+      trace.hidden = !hasTrace;
+      traceValue.textContent = hasTrace ? economicStructuredText(model.trace) : "";
+    }
+  }
+
+  function renderEconomicGate(proposal) {
+    const gate = isRecord(proposal?.deterministic_gate) ? proposal.deterministic_gate : {};
+    const status = text(gate.status).toUpperCase();
+    const badge = $("ops-economic-gate-status");
+    if (badge) {
+      const tone = /FAIL|BLOCK|ERROR|REJECT/.test(status) ? "coral" : /PASS|READY|ALLOW|EXECUT/.test(status) ? "lime" : "amber";
+      badge.className = `state-badge state-${tone}`;
+      badge.textContent = status ? pretty(status) : "Status unavailable";
+    }
+    const details = $("ops-economic-gate-details");
+    if (!details) return;
+    details.replaceChildren();
+    const reasons = economicValueText(gate.reasons, "Reasons unavailable from source.");
+    const values = [
+      ["Stock snapshot", economicSnapshotText(gate.stock_snapshot)],
+      ["Contract snapshot", economicSnapshotText(gate.contract_snapshot)],
+      ["Time snapshot", economicSnapshotText(gate.time_snapshot)],
+    ];
+    values.forEach(([label, value]) => {
+      const item = document.createElement("div"); item.className = "ops-economic-gate-detail";
+      const title = document.createElement("strong"); title.textContent = label;
+      const detail = document.createElement("span"); detail.textContent = value;
+      item.append(title, detail); details.append(item);
+    });
+    const reasonsItem = document.createElement("div"); reasonsItem.className = "ops-economic-gate-detail ops-economic-gate-reasons";
+    const reasonsTitle = document.createElement("strong"); reasonsTitle.textContent = "Reasons";
+    const reasonsDetail = document.createElement("span"); reasonsDetail.textContent = reasons;
+    reasonsItem.append(reasonsTitle, reasonsDetail); details.append(reasonsItem);
+  }
+
+  function renderEconomicCandidate(candidate, next) {
+    const id = firstText(candidate, ["candidate_id", "id"]);
+    const state = economicCandidateState(candidate);
+    const dispatches = Array.isArray(candidate.dispatches) ? candidate.dispatches.filter(isRecord) : [];
+    const shipmentQuantities = Array.isArray(candidate.shipment_quantities) ? candidate.shipment_quantities : [];
+    const card = document.createElement("article"); card.className = "ops-economic-candidate";
+    const header = document.createElement("header"); header.className = "ops-economic-candidate-header";
+    const heading = document.createElement("div"); heading.className = "ops-economic-candidate-heading";
+    const label = document.createElement("strong"); label.className = "ops-economic-candidate-label";
+    const mappedLabel = id === "split20"
+      ? `Send ${economicQuantityText(shipmentQuantities[0])} now, ${economicQuantityText(shipmentQuantities[1])} later`
+      : id === "consolidation25"
+        ? `Wait and send all ${economicQuantityText(shipmentQuantities[0] ?? candidate.shipment_quantities)}`
+        : "";
+    label.textContent = mappedLabel || firstText(candidate, ["label", "title"]) || (id ? pretty(id) : "Dispatch candidate");
+    heading.append(label);
+    if (id) {
+      const idNode = document.createElement("small"); idNode.className = "ops-economic-candidate-id"; idNode.textContent = id; heading.append(idNode);
+    }
+    const status = document.createElement("span"); status.className = `state-badge state-${state.tone}`; status.textContent = state.label;
+    header.append(heading, status); card.append(header);
+
+    const quantityBox = document.createElement("div"); quantityBox.className = "ops-economic-quantity";
+    const quantityLabel = document.createElement("span"); quantityLabel.textContent = "Shipment quantities";
+    const quantityValue = document.createElement("strong"); quantityValue.textContent = economicQuantityText(candidate.shipment_quantities);
+    quantityBox.append(quantityLabel, quantityValue); card.append(quantityBox);
+
+    const facts = document.createElement("div"); facts.className = "ops-economic-facts";
+    const postage = economicPostageDetails(candidate);
+    const postageFact = document.createElement("div"); postageFact.className = "ops-economic-fact";
+    const postageLabel = document.createElement("span"); postageLabel.textContent = "Estimated postage";
+    const postageValue = document.createElement("strong"); postageValue.textContent = postage.amountText;
+    postageFact.append(postageLabel, postageValue);
+    const postageDetail = document.createElement("small"); postageDetail.textContent = [
+      postage.label || "Postage estimate supplied by the source.",
+      safeHref(postage.sourceRef) ? "" : postage.sourceRef,
+    ].filter(Boolean).join(" · ");
+    if (safeHref(postage.sourceRef)) {
+      const sourceLink = document.createElement("a"); sourceLink.href = safeHref(postage.sourceRef); sourceLink.target = "_blank"; sourceLink.rel = "noopener noreferrer"; sourceLink.textContent = postageDetail.textContent; sourceLink.title = postage.sourceRef;
+      postageDetail.replaceChildren(sourceLink);
+    }
+    postageFact.append(postageDetail);
+    const deadlineFact = document.createElement("div"); deadlineFact.className = "ops-economic-fact";
+    const deadlineLabel = document.createElement("span"); deadlineLabel.textContent = dispatches.length > 1 ? "First dispatch deadline" : "Dispatch deadline";
+    const deadline = firstText(candidate, ["dispatch_deadline"]) || firstText(dispatches[0], ["deadline"]);
+    const deadlineValue = document.createElement("strong"); deadlineValue.textContent = economicDateText(deadline, "Deadline unavailable from source.");
+    deadlineFact.append(deadlineLabel, deadlineValue);
+    facts.append(postageFact, deadlineFact); card.append(facts);
+
+    if (dispatches.length > 1) {
+      const tail = dispatches[dispatches.length - 1];
+      const tailFact = document.createElement("div"); tailFact.className = "ops-economic-fact";
+      const tailLabel = document.createElement("span"); tailLabel.textContent = "Tail dispatch deadline";
+      const tailDeadline = document.createElement("strong"); tailDeadline.textContent = economicDateText(tail.deadline, "Deadline unavailable from source.");
+      const tailDetail = document.createElement("small"); tailDetail.textContent = [
+        finite(numberFrom(tail.quantity)) ? `Quantity ${formatNumber(numberFrom(tail.quantity))}` : "",
+        firstText(tail, ["lot"]) ? `Lot ${firstText(tail, ["lot"])}` : "",
+      ].filter(Boolean).join(" · ");
+      tailFact.append(tailLabel, tailDeadline);
+      if (tailDetail.textContent) tailFact.append(tailDetail);
+      facts.append(tailFact);
+    }
+
+    const conditions = document.createElement("p"); conditions.className = "ops-economic-conditions"; conditions.textContent = `Conditions: ${economicConditionsText(candidate.conditions)}`; card.append(conditions);
+    if (isRecord(candidate.proposal_effect)) {
+      const effect = document.createElement("p"); effect.className = "ops-economic-effect";
+      const effectSummary = economicEffectSummary({ proposal_effect: candidate.proposal_effect }, next);
+      effect.textContent = effectSummary
+        ? `Proposal effect: ${effectSummary}`
+        : "Proposal effect: source detail unavailable.";
+      card.append(effect);
+    }
+    const actions = document.createElement("div"); actions.className = "ops-economic-candidate-actions";
+    if (state.label === "Executable" && id) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "button button-primary"; button.dataset.candidateId = id;
+      button.innerHTML = '<i class="ph ph-package" aria-hidden="true"></i>Prepare this dispatch';
+      button.addEventListener("click", () => { void prepareEconomicProposal(id); });
+      actions.append(button);
+    } else {
+      const note = document.createElement("span"); note.className = "ops-economic-unavailable"; note.textContent = state.label === "Conditional" ? "Prepare when the dispatch checks are satisfied." : "Candidate support is unavailable from the source."; actions.append(note);
+    }
+    card.append(actions);
+    return card;
+  }
+
+  function renderEconomicProposal(next) {
+    const panel = $("ops-economic-panel");
+    const proposal = economicProposalFrom(next);
+    if (!panel) return;
+    if (!economicConfigured || !proposal) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    const status = text(proposal.status).toUpperCase();
+    const statusBadge = $("ops-economic-status");
+    if (statusBadge) {
+      statusBadge.className = `state-badge state-${economicStatusTone(status)}`;
+      statusBadge.textContent = status ? pretty(status) : "Status unavailable";
+    }
+    const snapshot = economicSnapshotValues(next, proposal);
+    const appliedStatus = economicEffectStatus(proposal, next);
+    const dispatchedQuantity = finite(snapshot.dispatched) && snapshot.dispatched > 0
+      ? snapshot.dispatched
+      : economicEffectQuantity(proposal, next);
+    const hasCompletedDispatch = /^(APPLIED|ALREADY_APPLIED)$/.test(appliedStatus)
+      || finite(snapshot.dispatched) && snapshot.dispatched > 0;
+    const subtitle = (hasCompletedDispatch
+      ? [
+        finite(dispatchedQuantity) ? `${formatNumber(dispatchedQuantity)} dispatched` : "",
+        finite(snapshot.awaiting_release) ? `${formatNumber(snapshot.awaiting_release)} awaiting release` : "",
+      ]
+      : [
+        finite(snapshot.ordered) ? `${formatNumber(snapshot.ordered)} ordered` : "",
+        finite(snapshot.ready) ? `${formatNumber(snapshot.ready)} ready` : "",
+        finite(snapshot.awaiting_release) ? `${formatNumber(snapshot.awaiting_release)} awaiting release` : "",
+      ]).filter(Boolean);
+    setText("ops-economic-subtitle", subtitle.length
+      ? `${subtitle.join(" · ")}. Compare a supported dispatch with a conditional consolidation path.`
+      : "Compare dispatch paths against the current order evidence.");
+    const selection = $("ops-economic-selection");
+    if (selection) {
+      const selected = text(proposal.selected_candidate_id);
+      const effect = economicEffectSummary(proposal, next);
+      selection.textContent = [
+        selected ? `Selected candidate: ${selected}` : "No candidate selected; review the dispatch checks before preparing one.",
+        effect ? `Proposal effect readback: ${effect}` : "",
+      ].filter(Boolean).join(" · ");
+    }
+    const candidates = $("ops-economic-candidates");
+    if (candidates) {
+      const values = Array.isArray(proposal.candidates) ? proposal.candidates : [];
+      candidates.replaceChildren(...(values.length ? values.map((candidate) => renderEconomicCandidate(candidate, next)) : [emptyList("No dispatch candidates were supplied by the source.")]));
+      candidates.querySelectorAll("button[data-candidate-id]").forEach((button) => {
+        button.disabled = preparingEconomic || next?.available !== true;
+        if (preparingEconomic) button.setAttribute("aria-busy", "true"); else button.removeAttribute("aria-busy");
+      });
+    }
+    const difference = $("ops-economic-difference");
+    const postageDifference = economicPostageDifference(proposal);
+    if (difference) {
+      difference.replaceChildren();
+      difference.hidden = !postageDifference;
+      if (postageDifference) {
+        const label = document.createElement("span"); label.textContent = "Estimated postage difference · estimate only";
+        const amount = document.createElement("strong"); amount.textContent = `${postageDifference.currency} ${economicAmountText(postageDifference.amount)}`;
+        const note = document.createElement("span"); note.textContent = "Not savings achieved.";
+        difference.append(label, amount, note);
+      }
+    }
+    const compare = $("ops-economic-compare");
+    if (compare) compare.disabled = preparingEconomic;
+    const sources = $("ops-economic-sources");
+    if (sources) {
+      sources.replaceChildren();
+      const values = economicSourceEntries(proposal);
+      values.forEach((source, index) => renderEconomicSource(sources, source, index));
+      if (!values.length) sources.append(emptyList("No economic source evidence references were supplied."));
+    }
+    renderEconomicModel(proposal);
+    renderEconomicGate(proposal);
+    if (/^(APPLIED|ALREADY_APPLIED)$/.test(appliedStatus)) {
+      setEconomicFeedback(
+        `${economicEffectSummary(proposal, next) || `Native readback ${pretty(appliedStatus)}`}. Current native readback is shown below; no physical delivery or postage payment occurred.`,
+        "success",
+      );
+    }
+  }
+
+  function economicProposalInResponse(value) {
+    const records = [value, value?.distributor_operations, value?.projection, value?.operation, value?.result];
+    for (const record of records) {
+      const proposal = economicProposalFrom(record) || economicProposalFrom(unwrapProjection(record));
+      if (proposal) return proposal;
+    }
+    return null;
+  }
+
+  function preparedProposalInResponse(value) {
+    const records = [value, value?.distributor_operations, value?.projection, value?.operation, value?.result];
+    for (const record of records) {
+      if (isRecord(record?.prepared_proposal)) return record.prepared_proposal;
+      const projectionValue = unwrapProjection(record);
+      if (isRecord(projectionValue?.prepared_proposal)) return projectionValue.prepared_proposal;
+    }
+    return null;
+  }
+
+  function economicResponseProjection(value) {
+    const base = unwrapProjection(value) || projection;
+    if (!isRecord(base)) return null;
+    const next = { ...base };
+    const proposal = economicProposalInResponse(value);
+    const prepared = preparedProposalInResponse(value);
+    if (proposal) next.economic_proposal = proposal;
+    if (prepared) next.prepared_proposal = prepared;
+    return next;
   }
 
   function openEvidenceDrawer(trigger) {
@@ -1500,7 +2301,7 @@
     managerColumn.append(managerKicker, manager);
     network.append(sourceColumn, agentColumn, managerColumn);
     graph.replaceChildren(network);
-    setText("ops-overview-case", `${next.case_id || "Case unavailable"} · ${next.purchase_order || "PO unavailable"}`);
+    setText("ops-overview-case", `${next.case_id || "Case unavailable"} · ${purchaseOrderDisplay(next) || "PO unavailable"}`);
     setText("ops-alert-focus-link", next._provided.alerts && activeAlerts.length === 0 ? "Review resolved incident" : "Focus active alert");
     setText("ops-overview-copy", activeAlerts.length ? "Open incident evidence is highlighted." : incidentAlerts.length ? "Resolved incident evidence is retained." : "Source records flow into read-only reasoning and manager control.");
   }
@@ -2661,10 +3462,10 @@
     }
     renderRefreshState();
     document.body.dataset.operationsState = next.available ? "ready" : "disabled";
+    renderHeaderIncidentState(next);
     setText("ops-case-label", next.case_label || (next.available ? "Current operation" : "No configured operation"));
     setText("ops-case-id", next.case_id || "Case identifier unavailable");
-    const purchaseOrder = purchaseOrderRecord(next);
-    setText("ops-case-po", purchaseOrder ? `PO ${firstText(purchaseOrder, ["name", "record_id", "id"]) || "identifier unavailable"}` : "Purchase order unavailable");
+    setText("ops-case-po", purchaseOrderDisplay(next) || "Purchase order unavailable");
     const stageLabel = deliveryCompletionLabel(next) || pretty(next.stage);
     setText("ops-stage-badge", stageLabel);
     const stageBadge = $("ops-stage-badge"); stageBadge.className = `state-badge state-${statusTone(stageLabel)}`; stageBadge.textContent = stageLabel;
@@ -2673,6 +3474,7 @@
     renderHero(next);
     renderOrderValue(next);
     renderEvidenceDrawer(next);
+    renderEconomicProposal(next);
     const sourceStateKind = projectionSourceState(next);
     if (!next.available) {
       voiceController?.setAnswer("");
@@ -2727,12 +3529,79 @@
     }
     return payload;
   }
+
+  async function prepareEconomicProposal(candidateId) {
+    const proposal = economicProposalFrom(projection);
+    const id = text(candidateId);
+    const candidate = Array.isArray(proposal?.candidates)
+      ? proposal.candidates.find((item) => firstText(item, ["candidate_id", "id"]) === id)
+      : null;
+    if (preparingEconomic) return;
+    if (!economicConfigured || !proposal || projection?.available !== true || !text(projection?.case_id)) {
+      setEconomicFeedback("Economic dispatch preparation is unavailable from the current case.", "error");
+      return;
+    }
+    if (!candidate || candidate.executable !== true || !id) {
+      setEconomicFeedback("This dispatch remains conditional and cannot be prepared from the current evidence.", "error");
+      return;
+    }
+    preparingEconomic = true;
+    setEconomicFeedback("Preparing this dispatch proposal for manager approval…");
+    renderEconomicProposal(projection);
+    try {
+      const response = await requestJSON(`${API_PATH}/prepare-economic-proposal`, {
+        method: "POST",
+        body: JSON.stringify({ case_id: projection.case_id, selected_candidate_id: id }),
+      });
+      const next = economicResponseProjection(response);
+      if (next) renderProjection(next);
+      setEconomicFeedback(
+        preparedProposalInResponse(response)
+          ? "Dispatch proposal prepared for manager approval in the existing Manager gate. No physical delivery or postage payment occurred."
+          : "Economic proposal readback received. No physical delivery or postage payment occurred.",
+        "success",
+      );
+    } catch (error) {
+      setEconomicFeedback(error.message || "Economic dispatch proposal could not be prepared from the current case.", "error");
+    } finally {
+      preparingEconomic = false;
+      renderEconomicProposal(projection);
+    }
+  }
+
+  async function compareEconomicProposal() {
+    if (preparingEconomic) return;
+    if (!economicConfigured || !economicProposalFrom(projection) || projection?.available !== true || !text(projection?.case_id)) {
+      setEconomicFeedback("Economic comparison is unavailable from the current case.", "error");
+      return;
+    }
+    preparingEconomic = true;
+    setEconomicFeedback("Comparing dispatch options with the agent…");
+    renderEconomicProposal(projection);
+    try {
+      const response = await requestJSON(`${API_PATH}/prepare-economic-proposal`, {
+        method: "POST",
+        body: JSON.stringify({ case_id: projection.case_id }),
+      });
+      const next = economicResponseProjection(response);
+      if (next) renderProjection(next);
+      setEconomicFeedback("Economic comparison readback received. Choose a supported candidate to prepare it; no physical delivery or postage payment occurred.", "success");
+    } catch (error) {
+      setEconomicFeedback(error.message || "Economic comparison could not be read from the current case.", "error");
+    } finally {
+      preparingEconomic = false;
+      renderEconomicProposal(projection);
+    }
+  }
+
   async function refresh({ silent = false, periodic = false } = {}) {
     if (loading) { if (!periodic) refreshQueued = true; return null; }
     loading = true;
     if (!silent && !projection) setConnection("Connecting", "cyan");
     try {
       const payload = await requestJSON(API_PATH);
+      const configuredProjection = isRecord(payload?.distributor_operations) ? payload.distributor_operations : null;
+      if (configuredProjection) economicConfigured = isRecord(configuredProjection.economic_proposal);
       const next = unwrapProjection(payload);
       if (!next) throw new Error("The source returned no distributor operation projection.");
       renderProjection(next);
@@ -2829,7 +3698,7 @@
         method: "POST",
         body: JSON.stringify({ proposal_id: proposal.proposal_id, case_id: projection.case_id, state_revision: proposal.state_revision, manager_id: managerId }),
       });
-      const next = unwrapProjection(response);
+      const next = economicResponseProjection(response) || unwrapProjection(response);
       preparedProposal = null;
       if (next) renderProjection(next, { resetEventFields: true });
       resetSelectedPhoto();
@@ -2849,6 +3718,8 @@
   });
   $("ops-retry").addEventListener("click", () => { void refresh(); });
   $("ops-open-evidence-drawer")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
+  $("ops-economic-compare")?.addEventListener("click", () => { void compareEconomicProposal(); });
+  $("ops-economic-open-evidence")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
   $("ops-evidence-drawer-close")?.addEventListener("click", closeEvidenceDrawer);
   $("ops-evidence-drawer-backdrop")?.addEventListener("click", closeEvidenceDrawer);
   $("ops-evidence-drawer-open-operations")?.addEventListener("click", openFullOperationsEvidence);

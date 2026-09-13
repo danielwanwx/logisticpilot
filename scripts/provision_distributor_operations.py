@@ -50,6 +50,12 @@ COMPONENT_INSPECTION_WAREHOUSE: Final = "M20 Distributor Component Inspection"
 _COMPONENT_ORDER_25: Final = "REQUIRES_PROVISION_COMPONENT_ORDER_25"
 _COMPONENT_ORDER_15: Final = "REQUIRES_PROVISION_COMPONENT_ORDER_15"
 
+ECONOMIC_CASE_ALIAS: Final = "LP-POC-COST-01"
+ECONOMIC_SNAPSHOT: Final = "2026-09-13T09:00:00-07:00"
+ECONOMIC_FIRST_DISPATCH_DEADLINE: Final = "2026-09-14T15:00:00-07:00"
+ECONOMIC_FINAL_DISPATCH_DEADLINE: Final = "2026-09-16T15:00:00-07:00"
+_ECONOMIC_ORDER_25: Final = "REQUIRES_PROVISION_ECONOMIC_ORDER_25"
+
 
 def _component_identities(instance: str | None) -> dict[str, str]:
     """Return isolated identifiers; the existing fixture remains byte-for-byte unchanged."""
@@ -83,6 +89,30 @@ def _component_identities(instance: str | None) -> dict[str, str]:
         "batch_c": f"M20-DIST-COMP-{namespace}-BATCH-C",
         "shipment_25": f"{case_id}-SHIP-25",
         "shipment_15": f"{case_id}-SHIP-15",
+    }
+
+
+def _economic_identities(instance: str) -> dict[str, str]:
+    """Return a fresh, exact namespace for the isolated postage POC only."""
+
+    namespace = instance.strip()
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9-]{0,23}", namespace):
+        raise ProvisioningBlocked("instance must be uppercase letters, digits, or hyphens")
+    marker = f"M20 DIST ECONOMIC {namespace} SYNTHETIC"
+    case_id = f"M20-DIST-ECONOMIC-{namespace}"
+    return {
+        "case_id": case_id,
+        "marker": marker,
+        "po_marker": f"{marker} PURCHASE ORDER",
+        "accepted_warehouse": f"M20 Distributor Economic {namespace} Accepted",
+        "inspection_warehouse": f"M20 Distributor Economic {namespace} Inspection",
+        "batch_a": f"M20-DIST-ECONOMIC-{namespace}-BATCH-A20",
+        "batch_b": f"M20-DIST-ECONOMIC-{namespace}-BATCH-B5",
+        "shipment_25": f"{case_id}-SHIP-25",
+        "customer": f"M20 Economic {namespace} Customer A",
+        "pickup": f"M20 Economic {namespace} Pickup",
+        "destination": f"M20 Economic {namespace} Destination A",
+        "contact": f"M20 Economic {namespace} Contact A",
     }
 
 
@@ -445,6 +475,196 @@ def _component_plan(
                     "pickup_to": "17:00:00",
                     "parcel_weight": 1,
                 },
+            },
+        },
+    }
+
+
+def _economic_plan(
+    *,
+    supplier: str,
+    date: str,
+    purchase_order: str,
+    purchase_order_item: str,
+    instance: str,
+    customer_order: str = _ECONOMIC_ORDER_25,
+    destination_id: str = "REQUIRES_PROVISION_ECONOMIC_DESTINATION_A",
+) -> dict[str, object]:
+    """Return one fresh, synthetic 20-now/5-held postage comparison case.
+
+    The numeric rate and package assertions are scoped evidence for the POC.
+    They do not represent a carrier booking, a paid invoice, or a customer saving.
+    """
+
+    identities = _economic_identities(instance)
+    economic_event_id = f"{identities['case_id']}-PICK-SPLIT20"
+    return {
+        "case_id": identities["case_id"],
+        "case_label": f"Synthetic economic shipment comparison {ECONOMIC_CASE_ALIAS}",
+        "synthetic_input": True,
+        "company": COMPANY,
+        "supplier": supplier,
+        "item_code": COMPONENT_ITEM,
+        "uom": "Nos",
+        "stock_uom": "Nos",
+        "expected_pack_quantity": 10,
+        "cartons": 3,
+        "purchase_order": purchase_order,
+        "purchase_order_item": purchase_order_item,
+        "marker": identities["marker"],
+        "currency": "USD",
+        "unit_rate": COMPONENT_UNIT_RATE,
+        "warehouses": {
+            "accepted": identities["accepted_warehouse"],
+            "quarantine": identities["inspection_warehouse"],
+        },
+        "receipt_plans": [
+            {
+                "lot": "LOT-A20",
+                "marker": f"{identities['marker']} LOT-A20",
+                "quantity": 20,
+                "cartons": 2,
+                "expected_pack_quantity": 10,
+                "warehouse": identities["inspection_warehouse"],
+                "batch_no": identities["batch_a"],
+            },
+            {
+                "lot": "LOT-B5",
+                "marker": f"{identities['marker']} LOT-B5",
+                "quantity": 5,
+                "cartons": 1,
+                "expected_pack_quantity": 5,
+                "warehouse": identities["inspection_warehouse"],
+                "batch_no": identities["batch_b"],
+            },
+        ],
+        "lots": [
+            {
+                "lot": "LOT-A20",
+                "expected_quantity": 20,
+                "cartons": 2,
+                "expected_pack_quantity": 10,
+            },
+            {
+                "lot": "LOT-B5",
+                "expected_quantity": 5,
+                "cartons": 1,
+                "expected_pack_quantity": 5,
+            },
+        ],
+        "allocations": [
+            {
+                "customer_order": customer_order,
+                "requested_quantity": 25,
+                "priority": 1,
+                "promised_delivery_at": ECONOMIC_FIRST_DISPATCH_DEADLINE,
+                "customer_priority": 1,
+                "partial_dispatch": True,
+                "minimum_dispatch_quantity": 10,
+                "allow_final_remainder": True,
+            }
+        ],
+        "customer_orders": [customer_order],
+        "allocation_policy": {"version": "v1"},
+        "pick_tranches": [
+            {"customer_order": customer_order, "lot": "LOT-A20", "quantity": 20},
+            {"customer_order": customer_order, "lot": "LOT-B5", "quantity": 5},
+        ],
+        "policy": {
+            "inspection_required": True,
+            "reservation_supported": False,
+            "inspection_criteria": {"diameter_mm": {"minimum": 9.9, "maximum": 10.1}},
+        },
+        "quality_parameters": {"diameter_mm": COMPONENT_QUALITY_PARAMETER},
+        "shipping": {
+            "native_read_enabled": True,
+            "shipments": {
+                customer_order: {
+                    "shipment_id_prefix": identities["shipment_25"],
+                    "pickup_address": "REQUIRES_PROVISION_ECONOMIC_PICKUP",
+                    "delivery_address": destination_id,
+                    "pickup_date": date,
+                    "pickup_from": "09:00:00",
+                    "pickup_to": "17:00:00",
+                    "parcel_weight": 1,
+                }
+            },
+        },
+        "economic_proposal": {
+            "version": "v1",
+            "case_alias": ECONOMIC_CASE_ALIAS,
+            "evaluation_snapshot": ECONOMIC_SNAPSHOT,
+            "contract": {
+                "evidence_id": "synthetic:economic-poc:customer-order-and-terms",
+                "customer_order": customer_order,
+                "destination_id": "DEMO-US-DEST-A",
+                "total_quantity": 25,
+                "partial_minimum_quantity": 10,
+                "split_first_dispatch_deadline": ECONOMIC_FIRST_DISPATCH_DEADLINE,
+                "split_final_dispatch_deadline": ECONOMIC_FINAL_DISPATCH_DEADLINE,
+                "consolidated_dispatch_deadline": ECONOMIC_FIRST_DISPATCH_DEADLINE,
+                "arrival_guarantee": False,
+                "late_penalty": False,
+            },
+            "quality": {
+                "evidence_id": "synthetic:economic-poc:quality-release",
+                "lots": [
+                    {"lot": "LOT-A20", "quantity": 20, "status": "QUALIFIED"},
+                    {"lot": "LOT-B5", "quantity": 5, "status": "NOT_RELEASED"},
+                ],
+            },
+            "cost": {
+                "evidence_id": "public:usps-notice-123-2026-07-12",
+                "source": "USPS_NOTICE_123",
+                "trusted_config": True,
+                "service": "USPS_PRIORITY_MAIL_RETAIL_MEDIUM_FLAT_RATE_BOX",
+                "currency": "USD",
+                "rate_per_physical_box": 24.8,
+                "checked_on": "2026-09-13",
+                "effective_on": "2026-07-12",
+                "public_rate_url": "https://pe.usps.com/text/dmm300/Notice123.htm",
+            },
+            "physical_fit": [
+                {
+                    "evidence_id": "synthetic:economic-poc:physical-fit-a20",
+                    "quantity": 20,
+                    "boxes": 1,
+                    "genuine_usps_medium_flat_rate_box": True,
+                    "max_weight_lb": 70,
+                    "nonhazardous": True,
+                },
+                {
+                    "evidence_id": "synthetic:economic-poc:physical-fit-a5",
+                    "quantity": 5,
+                    "boxes": 1,
+                    "genuine_usps_medium_flat_rate_box": True,
+                    "max_weight_lb": 70,
+                    "nonhazardous": True,
+                },
+                {
+                    "evidence_id": "synthetic:economic-poc:physical-fit-a25",
+                    "quantity": 25,
+                    "boxes": 1,
+                    "genuine_usps_medium_flat_rate_box": True,
+                    "max_weight_lb": 70,
+                    "nonhazardous": True,
+                },
+            ],
+            "split20_event": {
+                "event_id": economic_event_id,
+                "type": "picked",
+                "occurred_at": ECONOMIC_SNAPSHOT,
+                "evidence_ref": "synthetic:economic-poc:split20-manager-decision",
+                "synthetic": True,
+                "customer_order": customer_order,
+                "lot": "LOT-A20",
+                "quantity": 20,
+                "pick_evidence_ref": "synthetic:economic-poc:lot-a20-qualified",
+            },
+            "model_enabled": True,
+            "destination_mapping": {
+                "alias": "DEMO-US-DEST-A",
+                "erp_address_id": destination_id,
             },
         },
     }
@@ -824,6 +1044,137 @@ def _component_purchase_order(
     return reread, line_for(reread)
 
 
+def _economic_purchase_order(
+    client: ERPNextDemoExecutor,
+    *,
+    supplier: str,
+    inspection_warehouse: str,
+    date: str,
+    instance: str,
+) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    """Create or verify the isolated 25-unit purchase order for one POC namespace."""
+
+    po_marker = _economic_identities(instance)["po_marker"]
+
+    def candidates() -> list[Mapping[str, object]]:
+        query = urlencode(
+            {
+                "fields": json.dumps(["name", "docstatus"]),
+                "filters": json.dumps([["company", "=", COMPANY], ["supplier", "=", supplier]]),
+                "limit_page_length": "50",
+                "order_by": "creation asc",
+            }
+        )
+        rows = _rows(_request(client, f"/api/resource/Purchase%20Order?{query}"))
+        if len(rows) >= 50:
+            raise ProvisioningBlocked("economic POC PO discovery is incomplete")
+        documents = [
+            _document(
+                client,
+                "Purchase Order",
+                _required_text(row.get("name"), "economic POC PO row"),
+            )
+            for row in rows
+        ]
+        matched: list[Mapping[str, object]] = []
+        for document in documents:
+            items = document.get("items")
+            if not isinstance(items, list):
+                raise ProvisioningBlocked("economic POC PO has no item rows")
+            component_rows = [
+                row
+                for row in items
+                if isinstance(row, Mapping) and row.get("item_code") == COMPONENT_ITEM
+            ]
+            marked_rows = [row for row in component_rows if row.get("description") == po_marker]
+            if not marked_rows:
+                continue
+            if len(component_rows) != 1 or len(marked_rows) != 1:
+                raise ProvisioningBlocked(
+                    "economic POC PO has malformed exact instance marker rows"
+                )
+            matched.append(document)
+        if len(matched) > 1:
+            raise ProvisioningBlocked("ambiguous existing economic POC PO")
+        return matched
+
+    def line_for(order: Mapping[str, object]) -> Mapping[str, object]:
+        items = order.get("items")
+        if not isinstance(items, list):
+            raise ProvisioningBlocked("economic POC PO has no item rows")
+        component_rows = [
+            row
+            for row in items
+            if isinstance(row, Mapping) and row.get("item_code") == COMPONENT_ITEM
+        ]
+        lines = [row for row in component_rows if row.get("description") == po_marker]
+        if len(component_rows) != 1 or len(lines) != 1:
+            raise ProvisioningBlocked("economic POC PO does not have one marked item row")
+        line = lines[0]
+        if (
+            order.get("company") != COMPANY
+            or order.get("supplier") != supplier
+            or order.get("currency") != "USD"
+            or line.get("qty") != 25
+            or line.get("uom") != "Nos"
+            or line.get("stock_uom") != "Nos"
+            or line.get("conversion_factor") != 1
+            or line.get("rate") != COMPONENT_UNIT_RATE
+            or line.get("warehouse") != inspection_warehouse
+            or not isinstance(line.get("name"), str)
+        ):
+            raise ProvisioningBlocked("economic POC PO differs from the authorized fixture")
+        return line
+
+    matches = candidates()
+    if not matches:
+        response = _request(
+            client,
+            "/api/resource/Purchase%20Order",
+            method="POST",
+            payload={
+                "doctype": "Purchase Order",
+                "company": COMPANY,
+                "supplier": supplier,
+                "currency": "USD",
+                "conversion_rate": 1,
+                "transaction_date": date,
+                "schedule_date": date,
+                "items": [
+                    {
+                        "item_code": COMPONENT_ITEM,
+                        "description": po_marker,
+                        "qty": 25,
+                        "uom": "Nos",
+                        "stock_uom": "Nos",
+                        "conversion_factor": 1,
+                        "rate": COMPONENT_UNIT_RATE,
+                        "warehouse": inspection_warehouse,
+                        "schedule_date": date,
+                    }
+                ],
+            },
+        )
+        if not isinstance(response, Mapping) or not isinstance(response.get("data"), Mapping):
+            raise ProvisioningBlocked(
+                "unknown economic POC PO insert outcome; inspect before rerun"
+            )
+        matches = candidates()
+        if len(matches) != 1:
+            raise ProvisioningBlocked("economic POC PO insert could not be uniquely reread")
+    order = matches[0]
+    if order.get("docstatus") == 2:
+        raise ProvisioningBlocked("economic POC PO is cancelled; inspect before a new write")
+    line_for(order)
+    submitted = _submit(client, order) if order.get("docstatus") == 0 else order
+    if submitted.get("docstatus") != 1:
+        raise ProvisioningBlocked("economic POC PO is not submitted")
+    reread = _document(
+        client, "Purchase Order", _required_text(submitted.get("name"), "economic POC PO name")
+    )
+    return reread, line_for(reread)
+
+
 def provision_r4(client: ERPNextDemoExecutor, *, date: str) -> dict[str, object]:
     if client._environment != "demo":
         raise ProvisioningBlocked("writes require MISSING20_ENVIRONMENT=demo")
@@ -1108,6 +1459,185 @@ def provision_component(
     return config
 
 
+def provision_economic_poc(
+    client: ERPNextDemoExecutor, *, date: str, instance: str
+) -> dict[str, object]:
+    """Provision only the isolated base records for the 20-now/5-held POC.
+
+    Receipt and inspection events remain explicit existing operations API calls.
+    This function never books postage, pays a carrier, or executes a pick.
+    """
+
+    if client._environment != "demo":
+        raise ProvisioningBlocked("writes require MISSING20_ENVIRONMENT=demo")
+    if date != "2026-09-13":
+        raise ProvisioningBlocked("economic-poc requires the authorized 2026-09-13 business date")
+    reference_order, _ = _po_line(client)
+    supplier = _required_text(reference_order.get("supplier"), "PO16 supplier")
+    identities = _economic_identities(instance)
+
+    item = _component_item(client)
+    item_name = _required_text(item.get("name"), "economic POC item")
+    accepted = _warehouse(client, name=identities["accepted_warehouse"])
+    inspection = _warehouse(client, name=identities["inspection_warehouse"])
+    accepted_name = _required_text(accepted.get("name"), "economic POC accepted warehouse")
+    inspection_name = _required_text(inspection.get("name"), "economic POC inspection warehouse")
+    parameter = _component_quality_parameter(client)
+    if parameter.get("parameter") != COMPONENT_QUALITY_PARAMETER:
+        raise ProvisioningBlocked("economic POC quality parameter does not match the metric")
+    batches = {
+        lot: _component_batch(
+            client,
+            batch_id=batch_id,
+            item_code=item_name,
+            description=f"{identities['marker']} {lot}",
+            date=date,
+        )
+        for lot, batch_id in {
+            "LOT-A20": identities["batch_a"],
+            "LOT-B5": identities["batch_b"],
+        }.items()
+    }
+    batch_names = {
+        lot: _required_text(batch.get("name"), f"economic POC {lot} batch")
+        for lot, batch in batches.items()
+    }
+    purchase_order, po_item = _economic_purchase_order(
+        client,
+        supplier=supplier,
+        inspection_warehouse=inspection_name,
+        date=date,
+        instance=instance,
+    )
+    customer = _customer(client, name=identities["customer"])
+    customer_name = _required_text(customer.get("name"), "economic POC customer")
+    order = _sales_order(
+        client,
+        customer=customer,
+        warehouse=accepted_name,
+        quantity=25,
+        priority=1,
+        date=date,
+        item_code=item_name,
+        uom="Nos",
+        marker_prefix=identities["marker"],
+        unit_rate=COMPONENT_SALES_RATE,
+        delivery_date="2026-09-14",
+    )
+    order_name = _required_text(order.get("name"), "economic POC customer order")
+    pickup = _address(client, title=identities["pickup"], link_doctype="Company", link_name=COMPANY)
+    destination = _address(
+        client,
+        title=identities["destination"],
+        link_doctype="Customer",
+        link_name=customer_name,
+    )
+    contact = _contact(
+        client,
+        first_name=identities["contact"],
+        customer_name=customer_name,
+        email=f"m20-economic-{instance.lower()}@example.invalid",
+    )
+    pickup_name = _required_text(pickup.get("name"), "economic POC pickup address")
+    destination_name = _required_text(destination.get("name"), "economic POC destination")
+    contact_name = _required_text(contact.get("name"), "economic POC contact")
+    config = _economic_plan(
+        supplier=supplier,
+        date=date,
+        purchase_order=_required_text(purchase_order.get("name"), "economic POC PO"),
+        purchase_order_item=_required_text(po_item.get("name"), "economic POC PO item"),
+        instance=instance,
+        customer_order=order_name,
+        destination_id=destination_name,
+    )
+    config["warehouses"] = {"accepted": accepted_name, "quarantine": inspection_name}
+    plans = cast(list[dict[str, object]], config["receipt_plans"])
+    for plan in plans:
+        lot = _required_text(plan.get("lot"), "economic POC receipt plan lot")
+        plan["warehouse"] = inspection_name
+        plan["batch_no"] = batch_names[lot]
+    config["shipping"] = {
+        "native_read_enabled": True,
+        "shipments": {
+            order_name: {
+                "shipment_id_prefix": identities["shipment_25"],
+                "pickup_address": pickup_name,
+                "delivery_address": destination_name,
+                "delivery_contact": contact_name,
+                "pickup_date": date,
+                "pickup_from": "09:00:00",
+                "pickup_to": "17:00:00",
+                "parcel_weight": 1,
+            }
+        },
+    }
+    return config
+
+
+def _economic_activation_events(config: Mapping[str, object]) -> list[dict[str, object]]:
+    """Return explicit existing events needed to reach the documented initial snapshot.
+
+    These are displayed for review; provisioning itself does not record them.
+    """
+
+    marker = _required_text(config.get("marker"), "economic POC marker")
+    item_code = _required_text(config.get("item_code"), "economic POC item")
+    return [
+        {
+            "event_id": f"{config['case_id']}-ARRIVAL-A20",
+            "type": "arrival",
+            "occurred_at": "2026-09-13T08:30:00-07:00",
+            "evidence_ref": f"{marker} LOT-A20 RECEIPT",
+            "synthetic": True,
+            "cartons": 2,
+            "expected_pack_quantity": 10,
+            "observed_stock_quantity": 20,
+            "item_code": item_code,
+            "lot": "LOT-A20",
+        },
+        {
+            "event_id": f"{config['case_id']}-INSPECTION-A20",
+            "type": "inspection",
+            "occurred_at": "2026-09-13T08:45:00-07:00",
+            "evidence_ref": f"{marker} LOT-A20 WHOLE-LOT RELEASE",
+            "synthetic": True,
+            "lot": "LOT-A20",
+            "result": "PASS",
+            "scope": "WHOLE_LOT",
+            "metric": "diameter_mm",
+            "measured": 10,
+            "sample_quantity": 20,
+            "inspection_report_ref": f"{marker} LOT-A20 QUALITY",
+        },
+        {
+            "event_id": f"{config['case_id']}-ARRIVAL-B5",
+            "type": "arrival",
+            "occurred_at": "2026-09-13T08:50:00-07:00",
+            "evidence_ref": f"{marker} LOT-B5 RECEIPT",
+            "synthetic": True,
+            "cartons": 1,
+            "expected_pack_quantity": 5,
+            "observed_stock_quantity": 5,
+            "item_code": item_code,
+            "lot": "LOT-B5",
+        },
+        {
+            "event_id": f"{config['case_id']}-INSPECTION-B5-SAMPLE",
+            "type": "inspection",
+            "occurred_at": ECONOMIC_SNAPSHOT,
+            "evidence_ref": f"{marker} LOT-B5 SAMPLE HOLD",
+            "synthetic": True,
+            "lot": "LOT-B5",
+            "result": "FAIL",
+            "scope": "SAMPLE",
+            "metric": "diameter_mm",
+            "measured": 10.3,
+            "sample_quantity": 1,
+            "inspection_report_ref": f"{marker} LOT-B5 SAMPLE QUALITY",
+        },
+    ]
+
+
 def _write_private(path: Path, value: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -1126,7 +1656,7 @@ def main() -> int:
     parser.add_argument("--mode", choices=("dry", "read", "execute"), default="dry")
     parser.add_argument(
         "--scenario",
-        choices=("r4-follow-on", "component-quality"),
+        choices=("r4-follow-on", "component-quality", "economic-poc"),
         default="r4-follow-on",
     )
     parser.add_argument(
@@ -1136,7 +1666,7 @@ def main() -> int:
     parser.add_argument("--date", required=True, help="ERP business date, YYYY-MM-DD")
     parser.add_argument(
         "--instance",
-        help="uppercase fresh component namespace; component-quality only",
+        help="uppercase fresh namespace; required for economic-poc",
     )
     args = parser.parse_args()
     datetime.fromisoformat(f"{args.date}T00:00:00+00:00")
@@ -1144,8 +1674,14 @@ def main() -> int:
         raise ProvisioningBlocked("--mode execute requires explicit --execute")
     if args.execute and args.mode != "execute":
         raise ProvisioningBlocked("--execute is valid only with --mode execute")
-    if args.instance is not None and args.scenario != "component-quality":
-        raise ProvisioningBlocked("--instance is valid only with --scenario component-quality")
+    if args.instance is not None and args.scenario not in {"component-quality", "economic-poc"}:
+        raise ProvisioningBlocked(
+            "--instance is valid only with --scenario component-quality or economic-poc"
+        )
+    if args.scenario == "economic-poc" and args.instance is None:
+        raise ProvisioningBlocked("economic-poc requires an isolated --instance")
+    if args.scenario == "economic-poc" and args.date != "2026-09-13":
+        raise ProvisioningBlocked("economic-poc requires the authorized 2026-09-13 business date")
     if args.mode == "dry":
         if args.scenario == "r4-follow-on":
             template = _plan(
@@ -1154,13 +1690,22 @@ def main() -> int:
                 date=args.date,
             )
             unresolved_source_fields = ["supplier", "purchase_order_item"]
-        else:
+        elif args.scenario == "component-quality":
             template = _component_plan(
                 supplier="REQUIRES_READ_PO16_SUPPLIER",
                 date=args.date,
                 purchase_order="REQUIRES_PROVISION_COMPONENT_PURCHASE_ORDER",
                 purchase_order_item="REQUIRES_PROVISION_COMPONENT_PURCHASE_ORDER_ITEM",
                 instance=args.instance,
+            )
+            unresolved_source_fields = ["supplier"]
+        else:
+            template = _economic_plan(
+                supplier="REQUIRES_READ_PO16_SUPPLIER",
+                date=args.date,
+                purchase_order="REQUIRES_PROVISION_ECONOMIC_PURCHASE_ORDER",
+                purchase_order_item="REQUIRES_PROVISION_ECONOMIC_PURCHASE_ORDER_ITEM",
+                instance=cast(str, args.instance),
             )
             unresolved_source_fields = ["supplier"]
         value: dict[str, object] = {
@@ -1177,6 +1722,8 @@ def main() -> int:
             ],
             "note": "No credentials or ERP reads were used; run --mode read before --execute.",
         }
+        if args.scenario == "economic-poc":
+            value["activation_events"] = _economic_activation_events(template)
     else:
         client = ERPNextDemoExecutor.from_environment(ROOT)
         if client is None:
@@ -1189,13 +1736,22 @@ def main() -> int:
             if args.scenario == "r4-follow-on":
                 config_plan = _plan(po_item, supplier=supplier, date=args.date)
                 purchase_order_item: object = po_item["name"]
-            else:
+            elif args.scenario == "component-quality":
                 config_plan = _component_plan(
                     supplier=supplier,
                     date=args.date,
                     purchase_order="REQUIRES_PROVISION_COMPONENT_PURCHASE_ORDER",
                     purchase_order_item="REQUIRES_PROVISION_COMPONENT_PURCHASE_ORDER_ITEM",
                     instance=args.instance,
+                )
+                purchase_order_item = None
+            else:
+                config_plan = _economic_plan(
+                    supplier=supplier,
+                    date=args.date,
+                    purchase_order="REQUIRES_PROVISION_ECONOMIC_PURCHASE_ORDER",
+                    purchase_order_item="REQUIRES_PROVISION_ECONOMIC_PURCHASE_ORDER_ITEM",
+                    instance=cast(str, args.instance),
                 )
                 purchase_order_item = None
             value = {
@@ -1205,11 +1761,19 @@ def main() -> int:
                 "purchase_order_item": purchase_order_item,
                 "config_plan": config_plan,
             }
+            if args.scenario == "economic-poc":
+                value["activation_events"] = _economic_activation_events(config_plan)
         else:
             config = (
                 provision_r4(client, date=args.date)
                 if args.scenario == "r4-follow-on"
-                else provision_component(client, date=args.date, instance=args.instance)
+                else (
+                    provision_component(client, date=args.date, instance=args.instance)
+                    if args.scenario == "component-quality"
+                    else provision_economic_poc(
+                        client, date=args.date, instance=cast(str, args.instance)
+                    )
+                )
             )
             value = {
                 "mode": "execute",
@@ -1219,6 +1783,8 @@ def main() -> int:
                 "instance": args.instance,
                 "config": config,
             }
+            if args.scenario == "economic-poc":
+                value["activation_events"] = _economic_activation_events(config)
     _write_private(args.output, value)
     print(json.dumps({"mode": value["mode"], "output": str(args.output)}))
     return 0

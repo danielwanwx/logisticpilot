@@ -16,8 +16,12 @@ from scripts.provision_distributor_operations import (
     _component_identities,
     _component_plan,
     _component_purchase_order,
+    _economic_activation_events,
+    _economic_identities,
+    _economic_plan,
     _sales_order,
 )
+from the_missing_20.agents.distributor_economics import validate_economic_config
 
 
 def _plan(instance: str | None = None) -> dict[str, object]:
@@ -126,6 +130,63 @@ def test_fresh_contract_terms_make_date_precede_customer_priority() -> None:
             "allow_final_remainder": True,
         },
     ]
+
+
+def test_economic_poc_plan_is_isolated_and_keeps_cost_conditions_explicit() -> None:
+    plan = _economic_plan(
+        supplier="M20 Supplier",
+        date="2026-09-13",
+        purchase_order="PUR-ORD-ECON",
+        purchase_order_item="PO-ITEM-ECON",
+        instance="ECON-20260913",
+    )
+    validate_economic_config(plan)
+
+    assert plan["case_id"] == "M20-DIST-ECONOMIC-ECON-20260913"
+    assert plan["case_id"] != COMPONENT_CASE_ID
+    assert plan["customer_orders"] == ["REQUIRES_PROVISION_ECONOMIC_ORDER_25"]
+    assert plan["pick_tranches"] == [
+        {
+            "customer_order": "REQUIRES_PROVISION_ECONOMIC_ORDER_25",
+            "lot": "LOT-A20",
+            "quantity": 20,
+        },
+        {
+            "customer_order": "REQUIRES_PROVISION_ECONOMIC_ORDER_25",
+            "lot": "LOT-B5",
+            "quantity": 5,
+        },
+    ]
+    assert _economic_identities("ECON-20260913")["po_marker"] in plan["marker"] + " PURCHASE ORDER"
+
+    economic = plan["economic_proposal"]
+    assert isinstance(economic, Mapping)
+    assert economic["case_alias"] == "LP-POC-COST-01"
+    contract = economic["contract"]
+    assert isinstance(contract, Mapping)
+    assert contract["destination_id"] == "DEMO-US-DEST-A"
+    assert contract["partial_minimum_quantity"] == 10
+    assert contract["arrival_guarantee"] is False
+    assert contract["late_penalty"] is False
+    cost = economic["cost"]
+    assert isinstance(cost, Mapping)
+    assert cost["rate_per_physical_box"] == 24.8
+    assert cost["public_rate_url"] == "https://pe.usps.com/text/dmm300/Notice123.htm"
+    assert cost["trusted_config"] is True
+
+    activation = _economic_activation_events(plan)
+    assert [event["lot"] for event in activation if event["type"] == "arrival"] == [
+        "LOT-A20",
+        "LOT-B5",
+    ]
+    assert [event["occurred_at"] for event in activation] == sorted(
+        event["occurred_at"] for event in activation
+    )
+    assert activation[-1]["lot"] == "LOT-B5"
+    assert activation[-1]["result"] == "FAIL"
+    assert activation[-1]["scope"] == "SAMPLE"
+    assert activation[-1]["sample_quantity"] == 1
+    assert all(event["type"] != "picked" for event in activation)
 
 
 class SalesOrderClient:

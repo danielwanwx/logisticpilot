@@ -104,6 +104,9 @@ from the_missing_20.adapters.strands_models import (  # noqa: E402
 from the_missing_20.agents.distributor_allocation import (  # noqa: E402
     select_contract_plan,
 )
+from the_missing_20.agents.distributor_economics import (  # noqa: E402
+    select_economic_candidate,
+)
 from the_missing_20.agents.photo_receiving import StrandsPhotoReader  # noqa: E402
 from the_missing_20.agents.product_language import (  # noqa: E402
     ProductLanguageViolation,
@@ -1299,6 +1302,26 @@ def _distributor_native_allocation_selector(
     return select
 
 
+def _distributor_native_economic_selector(
+    *,
+    settings: Settings,
+    configured_model: object | None = None,
+    factory: AgentModelFactory | None = None,
+) -> Callable[[Mapping[str, object]], Mapping[str, object]]:
+    """Build the opt-in, read-only economic selector for explicit POST requests only."""
+
+    if factory is not None and configured_model is not None:
+        raise ValueError("economic selector accepts a factory or a model selection, not both")
+
+    def select(evidence: Mapping[str, object]) -> Mapping[str, object]:
+        selected_factory = factory or _distributor_model_factory(
+            settings=settings, configured_model=configured_model
+        )
+        return select_economic_candidate(evidence=evidence, factory=selected_factory)
+
+    return select
+
+
 def _distributor_model_unavailable(error: Exception) -> dict[str, str]:
     """Classify provider failures without returning provider messages to the client."""
 
@@ -1623,6 +1646,14 @@ class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
                 if self.distributor_operations is None
                 else self.distributor_operations.projection()
             )
+            if self.distributor_operations is not None and "economic_proposal" not in projection:
+                economic_projection = getattr(
+                    self.distributor_operations, "economic_projection", None
+                )
+                if callable(economic_projection):
+                    economic = economic_projection()
+                    if isinstance(economic, Mapping):
+                        projection["economic_proposal"] = dict(economic)
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -2167,6 +2198,18 @@ class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
                 result = operations.attach_photo(payload)
             elif action == "prepare-proposal":
                 result = operations.prepare_event_proposal(payload)
+            elif action == "prepare-economic-proposal":
+                economic_result = operations.prepare_economic_proposal(payload)
+                nested_projection = (
+                    economic_result.get("projection")
+                    if isinstance(economic_result, Mapping)
+                    else None
+                )
+                result = (
+                    dict(nested_projection)
+                    if isinstance(nested_projection, Mapping)
+                    else economic_result
+                )
             elif action == "approve-proposal":
                 result = operations.approve_event_proposal(payload)
                 should_sync = True
@@ -2675,6 +2718,7 @@ class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
             "/api/v1/distributor-operations/events",
             "/api/v1/distributor-operations/photo",
             "/api/v1/distributor-operations/prepare-proposal",
+            "/api/v1/distributor-operations/prepare-economic-proposal",
             "/api/v1/distributor-operations/approve-proposal",
             "/api/v1/distributor-operations/reconcile-receive",
             "/api/v1/distributor-operations/reselect-pending-allocation",
@@ -2944,12 +2988,25 @@ class DecisionWorkspaceServer(ThreadingHTTPServer):
                 and distributor_settings.agent_provider is AgentProvider.BEDROCK
                 else None
             )
+            economic_config = raw_operations_config.get("economic_proposal")
+            distributor_economic_selector = (
+                _distributor_native_economic_selector(
+                    settings=distributor_settings,
+                    configured_model=distributor_model_selection,
+                )
+                if isinstance(economic_config, Mapping)
+                and economic_config.get("model_enabled") is True
+                and photo_values.get("MISSING20_NATIVE_RECEIVING_DIALOGUE") == "1"
+                and distributor_settings.agent_provider is AgentProvider.BEDROCK
+                else None
+            )
             self.distributor_operations = DistributorOperations(
                 normal_billing_runtime / "distributor-operations.sqlite3",
                 raw_operations_config,
                 native_adapter,
                 ask_turn=distributor_ask_turn,
                 allocation_selector=distributor_allocation_selector,
+                economic_selector=distributor_economic_selector,
                 retained_projection=(
                     photo_values.get("MISSING20_DISTRIBUTOR_RETAINED_PROJECTION", "0") == "1"
                 ),
