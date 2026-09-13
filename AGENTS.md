@@ -1,5 +1,22 @@
 # Project delivery requirements
 
+## Small-business hackathon scope and UI review (user steering, September 12)
+
+- Focus LogisticPilot on a small parts distributor with limited operations
+  staff and no dedicated supply-chain analyst. Prove one useful receiving
+  exception workflow with real evidence and business outcomes; do not expand
+  the entry into an enterprise suite or production-hardening program.
+- Treat the broad ROI metric catalog as research and a selection aid, not an
+  implementation checklist. Prefer a few visible, defensible outcomes.
+- Do not add UI unit tests. The user owns final visual and interaction review.
+  Verify that the selected demo flow actually calls the backend and reads back
+  its business result; do not replace this with component-level test volume.
+- Use narrowly scoped checks where changed business calculations, inventory
+  state, approval boundaries, or actual failures warrant them. Avoid redundant
+  tests, exhaustive UI edge cases, and broad repeated regression runs.
+- Preserve honest labels, real integrations, and reviewed milestone commits.
+  A hackathon scope does not permit fabricated execution or ROI claims.
+
 ## Competition demo priority (user steering, September 9)
 
 - Prioritize one visible same-order business path through receiving, supplier
