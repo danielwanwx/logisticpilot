@@ -16,6 +16,12 @@
   tests, exhaustive UI edge cases, and broad repeated regression runs.
 - Preserve honest labels, real integrations, and reviewed milestone commits.
   A hackathon scope does not permit fabricated execution or ROI claims.
+- Synthetic POC business evidence is explicitly authorized: combine public
+  reference rates or document layouts with consistent fictional orders,
+  waybills, cost statements and contract terms. Label the business scenario
+  and simulated savings; keep actual model calls and ERP execution real.
+  Real customer paperwork is not a prerequisite for this demo. Do not mistake
+  synthetic business inputs for permission to mock the agent or backend.
 
 ## Competition demo priority (user steering, September 9)
 
