@@ -1,0 +1,280 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900" role="img" aria-labelledby="diagram-title diagram-description">
+  <title id="diagram-title">LogisticPilot — Evidence-led fulfillment architecture</title>
+  <desc id="diagram-description">Static architecture diagram showing declared synthetic demo inputs flowing through the Operations UI, Python coordinator, deterministic gate, and bounded ERPNext actions with readback. A Strands agent on Bedrock Claude Opus 4.6 advises the coordinator. Airtable, Jira, Celigo, Slack, and a retained readback journal are shown as handoff evidence. Historical PO20 execution, current retained review mode, and separate historical AgentCore proof are clearly separated.</desc>
+  <defs>
+    <linearGradient id="page-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fbfa" />
+      <stop offset="1" stop-color="#edf5f1" />
+    </linearGradient>
+    <linearGradient id="panel-gradient" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3faf6" />
+      <stop offset="1" stop-color="#eaf5ef" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#204d42" flood-opacity="0.10" />
+    </filter>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#204d42" flood-opacity="0.08" />
+    </filter>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#2f8f6b" />
+    </marker>
+    <marker id="arrow-purple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#7564a9" />
+    </marker>
+    <marker id="arrow-gray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#789096" />
+    </marker>
+    <style>
+      text { font-family: Inter, "Avenir Next", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .ink { fill: #17353b; }
+      .muted { fill: #587178; }
+      .faint { fill: #789096; }
+      .green { fill: #237d5d; }
+      .purple { fill: #665596; }
+      .label { font-size: 11px; font-weight: 750; letter-spacing: 1.7px; }
+      .section-kicker { font-size: 11px; font-weight: 800; letter-spacing: 2px; fill: #2f8f6b; }
+      .section-title { font-size: 18px; font-weight: 720; fill: #17353b; }
+      .wordmark { font-size: 28px; font-weight: 800; letter-spacing: -0.7px; fill: #17353b; }
+      .subtitle { font-size: 15px; font-weight: 560; letter-spacing: 0.2px; fill: #537078; }
+      .node-title { font-size: 19px; font-weight: 760; letter-spacing: -0.2px; fill: #17353b; }
+      .node-copy { font-size: 13.5px; font-weight: 550; fill: #587178; }
+      .node-note { font-size: 11.5px; font-weight: 650; fill: #2f8f6b; }
+      .edge-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.15px; fill: #4b6870; }
+      .mode-title { font-size: 13px; font-weight: 800; letter-spacing: 0.2px; fill: #17353b; }
+      .mode-copy { font-size: 12.5px; font-weight: 570; fill: #587178; }
+      .card { fill: #ffffff; stroke: #cfe1d9; stroke-width: 1.5; }
+      .card-purple { fill: #fbfaff; stroke: #d9d2eb; stroke-width: 1.5; }
+      .card-neutral { fill: #ffffff; stroke: #d2e0df; stroke-width: 1.5; }
+      .branch-card { fill: #ffffff; stroke: #d2e0df; stroke-width: 1.4; }
+      .edge-primary { fill: none; stroke: #2f8f6b; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+      .edge-advisory { fill: none; stroke: #7564a9; stroke-width: 2; stroke-dasharray: 7 6; stroke-linecap: round; stroke-linejoin: round; }
+      .edge-retained { fill: none; stroke: #879ba0; stroke-width: 1.7; stroke-dasharray: 4 6; stroke-linecap: round; stroke-linejoin: round; }
+      .edge-bus { fill: none; stroke: #82ab99; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="900" fill="url(#page-gradient)" />
+  <rect x="24" y="24" width="1352" height="852" rx="28" fill="#ffffff" stroke="#d7e8e1" stroke-width="1.5" filter="url(#soft-shadow)" />
+
+  <!-- Header -->
+  <g id="header" aria-label="LogisticPilot title and legend">
+    <g transform="translate(58 51)">
+      <rect x="0" y="0" width="43" height="43" rx="12" fill="#2f8f6b" />
+      <path d="M 12 17 L 21.5 12 L 31 17 L 21.5 22 z M 12 17 L 12 28 L 21.5 33 L 21.5 22 z M 31 17 L 31 28 L 21.5 33" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round" />
+      <text x="58" y="27" class="wordmark">LogisticPilot</text>
+      <text x="59" y="51" class="subtitle">Evidence-led fulfillment</text>
+    </g>
+    <g transform="translate(1030 49)">
+      <rect x="0" y="0" width="302" height="35" rx="17.5" fill="#edf7f1" stroke="#c9e2d5" />
+      <circle cx="20" cy="17.5" r="5" fill="#2f8f6b" />
+      <text x="35" y="22" class="label green" letter-spacing="1.1px">PO20 · EVIDENCE &amp; AUTHORITY</text>
+    </g>
+    <text x="1030" y="111" class="muted" font-size="12.5" font-weight="600">Agent advises · deterministic application owns effects</text>
+    <g transform="translate(1030 127)">
+      <line x1="0" y1="0" x2="30" y2="0" class="edge-primary" marker-end="url(#arrow-green)" />
+      <text x="42" y="4" class="faint" font-size="11.5" font-weight="650">evidence / effect path</text>
+      <line x1="170" y1="0" x2="200" y2="0" class="edge-advisory" marker-end="url(#arrow-purple)" />
+      <text x="212" y="4" class="faint" font-size="11.5" font-weight="650">advisory path</text>
+    </g>
+  </g>
+
+  <!-- Primary path -->
+  <g id="primary-path" aria-label="Primary operation path">
+    <rect x="40" y="180" width="1320" height="264" rx="22" fill="url(#panel-gradient)" stroke="#d1e6dc" stroke-width="1.5" />
+    <text x="60" y="208" class="section-kicker">01 · PRIMARY OPERATION PATH</text>
+    <text x="60" y="232" class="section-title">From evidence to checked ERP records</text>
+    <text x="1340" y="211" text-anchor="end" class="muted" font-size="12px" font-weight="650">source mode stays visible at every step</text>
+
+    <!-- main lane connectors, behind cards -->
+    <path d="M 257 348 H 292" class="edge-primary" marker-end="url(#arrow-green)" />
+    <path d="M 457 348 H 492" class="edge-primary" marker-end="url(#arrow-green)" />
+    <path d="M 682 348 H 720" class="edge-primary" marker-end="url(#arrow-green)" />
+    <path d="M 925 348 H 968" class="edge-primary" marker-end="url(#arrow-green)" />
+    <path d="M 968 409 H 925" class="edge-retained" marker-end="url(#arrow-gray)" />
+    <text x="274" y="428" text-anchor="middle" class="edge-label">declared evidence</text>
+    <text x="474" y="428" text-anchor="middle" class="edge-label">case + intent</text>
+    <text x="701" y="428" text-anchor="middle" class="edge-label">proposal packet</text>
+    <text x="946" y="428" text-anchor="middle" class="edge-label">approved action</text>
+    <text x="946" y="441" text-anchor="middle" class="faint" font-size="10px" font-weight="650">native readback returns</text>
+
+    <!-- Strands advisory side lane -->
+    <path d="M 574 286 C 574 238 611 217 624 196" class="edge-advisory" marker-end="url(#arrow-purple)" />
+    <path d="M 654 196 C 654 223 612 242 612 286" class="edge-advisory" marker-end="url(#arrow-purple)" />
+    <text x="518" y="238" text-anchor="middle" class="purple" font-size="10.5px" font-weight="700">case evidence</text>
+    <text x="705" y="238" text-anchor="middle" class="purple" font-size="10.5px" font-weight="700">option / answer</text>
+
+    <!-- Declared demo inputs -->
+    <g id="node-inputs" role="group" aria-label="Declared demo inputs: count, lot, inspection, carrier; synthetic">
+      <rect x="50" y="276" width="207" height="143" rx="17" class="card" filter="url(#shadow)" />
+      <circle cx="74" cy="302" r="13" fill="#e0f2e8" />
+      <text x="74" y="307" text-anchor="middle" class="green" font-size="12px" font-weight="800">1</text>
+      <text x="96" y="306" class="label green" letter-spacing="1.15px">INPUTS</text>
+      <text x="69" y="338" class="node-title">Declared inputs</text>
+      <text x="69" y="364" class="node-copy">Count · lot · inspection · carrier</text>
+      <text x="69" y="386" class="node-copy">Operator-recorded, synthetic</text>
+      <rect x="69" y="397" width="91" height="16" rx="8" fill="#fff6d8" />
+      <text x="114" y="409" text-anchor="middle" fill="#8a6a1c" font-size="9.5px" font-weight="800" letter-spacing="0.8px">SYNTHETIC</text>
+    </g>
+
+    <!-- Operations UI -->
+    <g id="node-ui" role="group" aria-label="Operations UI: dashboard, investigation, approval">
+      <rect x="292" y="276" width="165" height="143" rx="17" class="card" filter="url(#shadow)" />
+      <circle cx="316" cy="302" r="13" fill="#e0f2e8" />
+      <text x="316" y="307" text-anchor="middle" class="green" font-size="12px" font-weight="800">2</text>
+      <text x="338" y="306" class="label green" letter-spacing="1.15px">OPERATOR</text>
+      <text x="311" y="338" class="node-title">Operations UI</text>
+      <text x="311" y="364" class="node-copy">Dashboard · investigation</text>
+      <text x="311" y="386" class="node-copy">Approval stays explicit</text>
+      <rect x="311" y="397" width="79" height="16" rx="8" fill="#edf7f1" />
+      <text x="350" y="409" text-anchor="middle" class="green" font-size="9.5px" font-weight="800" letter-spacing="0.8px">OPERATOR</text>
+    </g>
+
+    <!-- Python coordinator -->
+    <g id="node-coordinator" role="group" aria-label="Python coordinator: case state, evidence journal, application control">
+      <rect x="492" y="276" width="190" height="143" rx="17" class="card" filter="url(#shadow)" />
+      <circle cx="516" cy="302" r="13" fill="#e0f2e8" />
+      <text x="516" y="307" text-anchor="middle" class="green" font-size="12px" font-weight="800">3</text>
+      <text x="538" y="306" class="label green" letter-spacing="1.15px">COORDINATOR</text>
+      <text x="511" y="338" class="node-title">Python coordinator</text>
+      <text x="511" y="364" class="node-copy">Case state + evidence journal</text>
+      <text x="511" y="386" class="node-copy">Owns mutation boundary</text>
+      <rect x="511" y="397" width="93" height="16" rx="8" fill="#edf7f1" />
+      <text x="557" y="409" text-anchor="middle" class="green" font-size="9.5px" font-weight="800" letter-spacing="0.8px">COORDINATOR</text>
+    </g>
+
+    <!-- Deterministic gate -->
+    <g id="node-gate" role="group" aria-label="Deterministic gate: evidence, quantity, case and revision, operator approval">
+      <rect x="720" y="276" width="205" height="143" rx="17" class="card" filter="url(#shadow)" />
+      <circle cx="744" cy="302" r="13" fill="#e0f2e8" />
+      <text x="744" y="307" text-anchor="middle" class="green" font-size="12px" font-weight="800">4</text>
+      <text x="766" y="306" class="label green" letter-spacing="1.15px">VALIDATION</text>
+      <text x="739" y="338" class="node-title">Deterministic gate</text>
+      <text x="739" y="364" class="node-copy">Evidence · quantity</text>
+      <text x="739" y="386" class="node-copy">Case/revision · operator approval</text>
+      <rect x="739" y="397" width="59" height="16" rx="8" fill="#edf7f1" />
+      <text x="768" y="409" text-anchor="middle" class="green" font-size="9.5px" font-weight="800" letter-spacing="0.8px">GATE</text>
+    </g>
+
+    <!-- ERPNext -->
+    <g id="node-erpnext" role="group" aria-label="ERPNext: bounded native actions and authoritative readback">
+      <rect x="968" y="276" width="205" height="143" rx="17" class="card" filter="url(#shadow)" />
+      <circle cx="992" cy="302" r="13" fill="#e0f2e8" />
+      <text x="992" y="307" text-anchor="middle" class="green" font-size="12px" font-weight="800">5</text>
+      <text x="1014" y="306" class="label green" letter-spacing="1.15px">ERP</text>
+      <text x="987" y="338" class="node-title">ERPNext</text>
+      <text x="987" y="364" class="node-copy">Bounded native actions</text>
+      <text x="987" y="386" class="node-copy">Authoritative readback</text>
+      <rect x="987" y="397" width="81" height="16" rx="8" fill="#edf7f1" />
+      <text x="1027" y="409" text-anchor="middle" class="green" font-size="9.5px" font-weight="800" letter-spacing="0.8px">ERP SYSTEM</text>
+    </g>
+
+    <!-- Strands agent -->
+    <g id="node-strands" role="group" aria-label="Strands agent on Bedrock Claude Opus 4.6: advisory contract option and read-only Q and A">
+      <rect x="488" y="77" width="365" height="119" rx="18" class="card-purple" filter="url(#shadow)" />
+      <rect x="510" y="96" width="106" height="19" rx="9.5" fill="#eeeafa" />
+      <text x="563" y="109" text-anchor="middle" class="purple" font-size="9.5px" font-weight="800" letter-spacing="1.05px">ADVISORY LANE</text>
+      <text x="510" y="143" class="node-title">Strands agent</text>
+      <text x="510" y="166" class="purple" font-size="15px" font-weight="760">Bedrock · Claude Opus 4.6</text>
+      <rect x="510" y="174" width="154" height="16" rx="8" fill="#f0edfa" />
+      <text x="587" y="186" text-anchor="middle" class="purple" font-size="9.4px" font-weight="750">advisory contract option</text>
+      <rect x="673" y="174" width="137" height="16" rx="8" fill="#f0edfa" />
+      <text x="741" y="186" text-anchor="middle" class="purple" font-size="9.4px" font-weight="750">read-only Q&amp;A</text>
+    </g>
+  </g>
+
+  <!-- Handoff branch -->
+  <g id="handoffs" aria-label="Connected handoffs and retained readback journal">
+    <rect x="40" y="466" width="1320" height="279" rx="22" fill="#fbfdfc" stroke="#dbe8e3" stroke-width="1.5" />
+    <text x="60" y="496" class="section-kicker">02 · HANDOFFS AND READBACK</text>
+    <text x="60" y="520" class="section-title">The coordinator journals connected evidence after each bounded route</text>
+    <text x="1340" y="499" text-anchor="end" class="muted" font-size="12px" font-weight="650">source links and statuses stay inspectable</text>
+
+    <!-- coordinator branch bus -->
+    <path d="M 586 419 V 541" class="edge-bus" />
+    <path d="M 586 541 H 210 V 559" class="edge-primary" marker-end="url(#arrow-green)" />
+    <path d="M 586 541 H 465 V 559" class="edge-primary" marker-end="url(#arrow-green)" />
+    <path d="M 586 541 H 780 V 559" class="edge-primary" marker-end="url(#arrow-green)" />
+    <text x="209" y="548" text-anchor="middle" class="edge-label">case update</text>
+    <text x="465" y="548" text-anchor="middle" class="edge-label">exception context</text>
+    <text x="780" y="548" text-anchor="middle" class="edge-label">single attempt</text>
+
+    <!-- Celigo to Slack -->
+    <path d="M 890 606 H 925" class="edge-primary" marker-end="url(#arrow-green)" />
+    <text x="907" y="548" text-anchor="middle" class="edge-label">notification import</text>
+
+    <!-- branch cards -->
+    <g id="node-airtable" role="group" aria-label="Airtable: case record and lot disposition">
+      <rect x="100" y="559" width="220" height="95" rx="16" class="branch-card" filter="url(#soft-shadow)" />
+      <circle cx="123" cy="583" r="8" fill="#2f8f6b" />
+      <text x="143" y="589" class="node-title" font-size="17px">Airtable</text>
+      <text x="123" y="615" class="node-copy">Case record + lot disposition</text>
+      <text x="123" y="637" class="node-note">deterministic handoff / readback</text>
+    </g>
+    <g id="node-jira" role="group" aria-label="Jira: exception ownership and context">
+      <rect x="355" y="559" width="220" height="95" rx="16" class="branch-card" filter="url(#soft-shadow)" />
+      <circle cx="378" cy="583" r="8" fill="#2f8f6b" />
+      <text x="398" y="589" class="node-title" font-size="17px">Jira</text>
+      <text x="378" y="615" class="node-copy">Exception ownership + context</text>
+      <text x="378" y="637" class="node-note">deterministic handoff / readback</text>
+    </g>
+    <g id="node-celigo" role="group" aria-label="Celigo: single-attempt import and correlated run receipt">
+      <rect x="670" y="559" width="220" height="95" rx="16" class="branch-card" filter="url(#soft-shadow)" />
+      <circle cx="693" cy="583" r="8" fill="#2f8f6b" />
+      <text x="713" y="589" class="node-title" font-size="17px">Celigo</text>
+      <text x="693" y="615" class="node-copy">Single-attempt import</text>
+      <text x="693" y="637" class="node-note">correlated run receipt</text>
+    </g>
+    <g id="node-slack" role="group" aria-label="Slack: human operating context and verified notification">
+      <rect x="925" y="559" width="220" height="95" rx="16" class="branch-card" filter="url(#soft-shadow)" />
+      <circle cx="948" cy="583" r="8" fill="#2f8f6b" />
+      <text x="968" y="589" class="node-title" font-size="17px">Slack</text>
+      <text x="948" y="615" class="node-copy">Human operating context</text>
+      <text x="948" y="637" class="node-note">verified notification</text>
+    </g>
+
+    <!-- retained readback fan-in -->
+    <path d="M 210 654 V 682 H 574" class="edge-retained" marker-end="url(#arrow-gray)" />
+    <path d="M 465 654 V 670 H 650 V 682" class="edge-retained" marker-end="url(#arrow-gray)" />
+    <path d="M 780 654 V 682 H 720" class="edge-retained" marker-end="url(#arrow-gray)" />
+    <path d="M 1035 654 V 670 H 800 V 682" class="edge-retained" marker-end="url(#arrow-gray)" />
+    <text x="1210" y="686" text-anchor="end" class="faint" font-size="10.5px" font-weight="700">retained readback</text>
+    <g id="readback-journal" role="group" aria-label="Retained readback journal: provider link, status and timestamp">
+      <rect x="520" y="682" width="465" height="50" rx="15" fill="#f2f6f5" stroke="#cfdedb" stroke-width="1.4" />
+      <circle cx="546" cy="707" r="9" fill="#8aa0a3" />
+      <path d="M 542 707 l 3 3 l 6 -7" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+      <text x="565" y="704" class="mode-title">Retained readback journal</text>
+      <text x="565" y="721" class="mode-copy">provider link · status · timestamp · source mode</text>
+    </g>
+  </g>
+
+  <!-- Explicit mode boundaries -->
+  <g id="mode-boundaries" aria-label="Mode boundaries and evidence limitations">
+    <text x="60" y="770" class="section-kicker">03 · MODE BOUNDARIES</text>
+    <text x="1340" y="770" text-anchor="end" class="muted" font-size="12px" font-weight="650">same architecture · different evidence boundary</text>
+
+    <g id="historical-mode" role="group" aria-label="Historical PO20 native demo execution: 40 received and dispatched, A25 and B15, delivery confirmations synthetic">
+      <rect x="50" y="786" width="405" height="72" rx="16" fill="#fffaf0" stroke="#ead9a5" stroke-width="1.4" />
+      <rect x="67" y="800" width="83" height="17" rx="8.5" fill="#fff0bf" />
+      <text x="108" y="812" text-anchor="middle" fill="#8a6a1c" font-size="9.5px" font-weight="800" letter-spacing="1px">HISTORICAL</text>
+      <text x="67" y="835" class="mode-title">PO20 native demo execution</text>
+      <text x="67" y="851" class="mode-copy">40 received / dispatched · A25 / B15 · delivery synthetic</text>
+    </g>
+
+    <g id="current-mode" role="group" aria-label="Current review mode: retained source snapshot, real Opus answers, fresh operations disabled">
+      <rect x="497" y="786" width="405" height="72" rx="16" fill="#eff9f3" stroke="#c3dfd0" stroke-width="1.4" />
+      <rect x="514" y="800" width="113" height="17" rx="8.5" fill="#d9f0e2" />
+      <text x="570" y="812" text-anchor="middle" class="green" font-size="9.5px" font-weight="800" letter-spacing="1px">CURRENT REVIEW</text>
+      <text x="514" y="835" class="mode-title">Retained source snapshot · real Opus answers</text>
+      <text x="514" y="851" class="mode-copy">Fresh operations disabled</text>
+    </g>
+
+    <g id="agentcore-mode" role="group" aria-label="AgentCore separately proven historically and not the current application path">
+      <rect x="944" y="786" width="405" height="72" rx="16" fill="#f5f3fb" stroke="#d9d2eb" stroke-width="1.4" />
+      <rect x="961" y="800" width="123" height="17" rx="8.5" fill="#ebe7f7" />
+      <text x="1022" y="812" text-anchor="middle" class="purple" font-size="9.5px" font-weight="800" letter-spacing="1px">HISTORICAL PROOF</text>
+      <text x="961" y="835" class="mode-title">AgentCore · separately proven</text>
+      <text x="961" y="851" class="mode-copy">Read-only deployment evidence · not current path</text>
+    </g>
+  </g>
+</svg>

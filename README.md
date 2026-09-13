@@ -33,6 +33,10 @@ claim is made.
 
 ## Why this needs an agent
 
+For PO20, the agent explains inspection coverage and selects among supplied, versioned customer-contract options. Deterministic code computes feasible quantities and validates the selection. A held-out comparison against rules alone has not yet established the agent's incremental value.
+
+The broader investigation questions below also describe earlier recovery paths. They do not mean every source tool executes in today's retained PO20 conversation.
+
 The visible quantity mismatch is only the symptom. Before anyone retries a receipt,
 releases a lot, or posts an invoice, the operator must answer questions spread across
 five systems:
@@ -71,7 +75,7 @@ it is not connected to the current PO20 receiving path.
 
 ## Architecture
 
-![LogisticPilot current 40-part architecture](docs/architecture/distributor-operations-recording.visual-check.1440x900.light.png)
+![LogisticPilot evidence and authority architecture](docs/architecture/logisticpilot-submission.png)
 
 The current recording architecture follows synthetic demo inputs—operator, scanner,
 inspection, and carrier—through the Operations UI, the Python operation coordinator,
@@ -79,8 +83,9 @@ the Strands contract selector, the deterministic evidence gate, and validated ER
 actions. The recorded English Dashboard conversation uses Strands with direct Amazon
 Bedrock Claude Opus 4.6. The coordinator sends direct
 case updates to Airtable and Jira; Celigo carries the single-attempt Slack import.
-Native conversation reads fresh ERP facts and retained handoff journal evidence through
-an SDK session and remains read-only. AgentCore is historical evidence only.
+Connected-mode conversation can read fresh ERP facts and retained handoff journal evidence
+through an SDK session. Current review mode supplies a dated retained snapshot instead;
+both conversations remain read-only. AgentCore is historical evidence only.
 
 The model selects a versioned contract option and supplies evidence; deterministic
 application code owns quantity checks, authorization, inventory writes, and native
@@ -120,9 +125,14 @@ only after evidence checks and are followed by native readback.
 No production customer data, production accuracy, AgentCore Gateway/Policy, or causal
 revenue-uplift claim is presented.
 
-## How Strands is used
+## Strands usage and historical investigation evidence
 
-This is not a single prompt wrapped in a dashboard. The implementation includes:
+Current PO20 contract selection and retained read-only conversation use Strands with
+direct Bedrock Opus 4.6. The investigation/evaluator/trace capabilities below belong
+to separately demonstrated historical paths. The stopped current Graph experiment
+does not establish a multi-agent improvement.
+
+The historical investigation implementation includes:
 
 - a bounded investigation orchestrator;
 - scoped ERP, registry, integration, and collaboration tools;
