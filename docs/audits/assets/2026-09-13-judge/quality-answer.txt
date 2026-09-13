@@ -1,0 +1,71 @@
+LOT-B Quality Failure, Retest, Release, and Dispatch
+
+Source: RETAINED_AS_OF 2026-09-11T05:51:50 UTC | Case: M20-DIST-COMPONENT-V2-20260910
+
+---
+
+1. Did the Failed 2-Unit Sample Prove All 18 Units Were Defective?
+No. The evidence explicitly says it did not.
+
+The control context includes a binding quality interpretation:
+
+> *"A sample failure can hold a lot conservatively; it does not prove every held unit is defective."* > — `quality_interpretation` in control context
+
+Recorded facts about the failure:
+
+Field	Value	Source
+
+| Event | `2c5ad90a-351c-4f9e-9b85-3579794caa88` (evidence ref: `V2-20260910-inspection-b-fail`) | | Quality Inspection | MAT-QA-2026-00015 — Rejected | | Scope | SAMPLE (not whole lot) | | Sample quantity | 2 Nos out of 18 Nos received | | Metric | `diameter_mm` | | Measured | 10.3 mm | | Acceptance range | 9.9–10.1 mm (per `quality_policy.inspection_criteria`) | | Result | FAIL | | Stock Entry | MAT-STE-2026-00016 — Draft (not submitted; lot was held, not released) |
+
+Observation vs. inference:
+
+Recorded fact: 2 sampled units measured 10.3 mm, exceeding the 10.1 mm maximum. The lot was held (stock entry remained Draft).
+What this does NOT prove: That the remaining 16 untested units were also out of specification. The sample scope was `SAMPLE`, covering only 2 of 18 Nos. The hold was a conservative precaution, not a whole-lot defect finding.
+
+---
+
+2. What Evidence Allowed Later Release?
+
+A whole-lot retest passed, recorded approximately 5 minutes later:
+
+Field	Value	Source
+
+| Event | `9f24bd57-3c8d-45ae-ba6b-cf4d53da40fe` (evidence ref: `V2-20260910-inspection-b-retest`) | | Quality Inspection | MAT-QA-2026-00016 — Accepted | | Scope | WHOLE_LOT | | Sample quantity | 18 Nos (all units in LOT-B) | | Metric | `diameter_mm` | | Measured | 10.0 mm | | Result | PASS | | Occurred at | 2026-09-11T04:58:32 UTC |
+
+Operations triggered by the passing retest:
+
+1. Record inspection → MAT-STE-2026-00017 (Draft) + MAT-QA-2026-00016 (Accepted) 2. Release from quality → MAT-STE-2026-00017 (Submitted) — lot moved to usable stock 3. Prepare pick → STO-PICK-2026-00017 (Draft) — for SAL-ORD-2026-00015 (5 Nos) 4. Prepare pick → STO-PICK-2026-00018 (Draft) — for SAL-ORD-2026-00016 (13 Nos)
+
+Important caveat (recorded in `event_provenance.inspection_evidence`): > *"Quality Inspection records are declared report measurements and stated coverage; they are not independent physical tests performed by the agent."*
+
+The retest is a declared measurement, not an independently verified physical test. The evidence records that all 18 Nos were tested at whole-lot scope and measured 10.0 mm (within 9.9–10.1 mm), but this is a stated result, not an independently corroborated one.
+
+---
+
+3. Which Customer Quantities Shipped from LOT-B?
+
+After the retest pass, LOT-B's 18 Nos were split per allocation plan `cap-9f33e753e48b1945bb3d`:
+
+Customer	Sales Order	LOT-B Qty	Pick List	Delivery Note	Shipment	Picked At	Delivered At
+M20 Component Customer 25	SAL-ORD-2026-00015	5 Nos	STO-PICK-2026-00017 (Completed)	MAT-DN-2026-00019 (To Bill)	SHIPMENT-00017	05:11:50 UTC	05:31:57 UTC
+M20 Component Customer 15	SAL-ORD-2026-00016	13 Nos	STO-PICK-2026-00018 (Completed)	MAT-DN-2026-00020 (To Bill)	SHIPMENT-00018	05:16:31 UTC	05:40:14 UTC
+Total from LOT-B		18 Nos
+
+---
+
+4. Fact vs. Inference vs. Physical Delivery Proof — Summary
+Claim	Classification	Evidence
+2-unit sample measured 10.3 mm and failed	Recorded fact	MAT-QA-2026-00015 (Rejected), event `2c5ad90a`
+All 18 units in LOT-B were defective	Unsupported inference — contradicted by `quality_interpretation` and the SAMPLE scope	Only 2 of 18 were tested in the failing inspection
+18-unit whole-lot retest measured 10.0 mm and passed	Recorded fact (declared measurement, not independently verified)	MAT-QA-2026-00016 (Accepted), event `9f24bd57`
+LOT-B was released from quality hold	Recorded fact	MAT-STE-2026-00017 submitted
+5 Nos shipped to SAL-ORD-2026-00015	Recorded fact	SHIPMENT-00017, MAT-DN-2026-00019
+13 Nos shipped to SAL-ORD-2026-00016	Recorded fact	SHIPMENT-00018, MAT-DN-2026-00020
+Customers physically received the parts	Not proven	`independent_physical_receipt: NOT_VERIFIED` for both orders; all events are `synthetic: true`; `event_provenance.recorded_events` states these are *"not actual sensor, carrier, or customer-receipt proof"*
+The inspection results reflect actual physical measurements	Not independently verified	`event_provenance.inspection_evidence` states they are *"declared report measurements … not independent physical tests"*
+
+---
+
+Key Takeaway
+
+The 2-unit sample failure conservatively held LOT-B but did not prove all 18 units defective. A subsequent whole-lot retest (MAT-QA-2026-00016, all 18 Nos, 10.0 mm) passed and triggered release, allocation, and dispatch of 5 Nos to SAL-ORD-2026-00015 and 13 Nos to SAL-ORD-2026-00016. However, both the inspections and the delivery events are declared/recorded synthetic values — neither the quality measurements nor the customer deliveries are independently verified physical proof.

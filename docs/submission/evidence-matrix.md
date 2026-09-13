@@ -1,5 +1,7 @@
 # Release Evidence Matrix
 
+> **Historical matrix.** The claims below concern earlier cases and dates. For current LogisticPilot PO20 evidence, use the [current claim manifest](current-claim-manifest.md). Do not transfer the older invoice or USD42,000 result to PO20.
+
 > **September 9 finalization status: NOT READY.** The 20-unit / USD 42,000
 > evidence below belongs to the historical September 7 scenario. The separate
 > R4 photo-receiving case (PO16/PR7) proves one Box posted and recovered after a

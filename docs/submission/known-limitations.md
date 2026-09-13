@@ -1,5 +1,11 @@
 # Known Limitations — Release Review
 
+## Current PO20 limits — September 13
+
+The [current claim manifest](current-claim-manifest.md) and [judge review](../audits/2026-09-13-award-readiness.md) supersede the dated status below. Current limits: retained source snapshots; synthetic inspection/carrier inputs; no physical receipt or payment proof; incomplete judge-access package; no held-out evidence that the new Graph improves decisions. A prior real financial answer incorrectly inferred payment absence from missing invoices; a successful explicitly challenged follow-up would not establish general regression coverage. Long generated answers can also produce malformed Markdown tables.
+
+The older PO18, R4 invoice and September 7 evidence below remain historical and do not describe the current PO20 run.
+
 > **September 10 finalization: the new 40-part ERP loop is complete; submission NOT READY.**
 > Fresh case PO18 reached A25/B15 dispatched and explicitly synthetic delivery
 > confirmations. The same runtime retained the Jira-link and contract-readback

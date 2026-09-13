@@ -1,5 +1,7 @@
 # LogisticPilot — System Overview
 
+For the current PO20 submission, the [claim manifest](current-claim-manifest.md) is authoritative. The broader platform and historical 20-unit evidence described below must not be presented as current PO20 invoice, multi-agent, or live cross-system execution results.
+
 > **September 13 current status:** The retained PO20 review and real Claude Opus
 > 4.6 application answers are verified in the isolated workspace. Historical ERP
 > evidence records 40 received / 40 dispatched, allocated A25/B15. See the

@@ -1,5 +1,7 @@
 # LogisticPilot
 
+Current release evidence: [PO20 claim manifest](docs/submission/current-claim-manifest.md) · [strict judge review](docs/audits/2026-09-13-award-readiness.md). These distinguish historical native execution from today's retained review; older 20-unit invoice and multi-agent results are separate cases.
+
 > **September 13 current status:** The retained PO20 review and real Claude Opus
 > 4.6 application answers are verified in the isolated workspace. Historical ERP
 > evidence records 40 received / 40 dispatched, allocated A25/B15. See the

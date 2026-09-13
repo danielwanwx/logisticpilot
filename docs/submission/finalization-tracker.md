@@ -1,6 +1,14 @@
-# Finalization tracker — authoritative current ledger
+# Finalization tracker — current index and historical log
 
-## September 12 return-to-project audit
+## September 13 current state
+
+Use the [current PO20 claim manifest](current-claim-manifest.md) and [award-readiness review](../audits/2026-09-13-award-readiness.md) for current claims. The model denial described below was superseded by the verified Opus restoration. Fresh read-only ERP again returns 40 received/dispatched and zero held/missing stock; current UI answers use explicitly retained evidence. Historical native execution and current read-only inspection are separate evidence classes.
+
+The canonical product name is **LogisticPilot**, formerly The Missing 20. Devpost is being restored from the separate MedGuard draft. Public video, free judge access, entrant attestation and final submission remain release gates. The local 264.20-second film passed its recorded independent review.
+
+Everything below is a dated historical log, not a replacement for the current manifest.
+
+## Historical September 12 return-to-project audit (runtime defects subsequently repaired)
 
 **Current runtime needs updates; historical PO20 completion remains supported.**
 Fresh read-only ERP inspection confirms 40 received/dispatched and A25/B15.

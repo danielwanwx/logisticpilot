@@ -1,0 +1,59 @@
+Have Both Customers Paid? — Concise Answer
+
+Source: RETAINED_AS_OF 2026-09-11T05:51:50 UTC | Case: M20-DIST-COMPONENT-V2-20260910 | Live ERP not queried
+
+---
+
+1. No Evidence of Payment by Either Customer
+Document	Status in Evidence	Implication
+SAL-ORD-2026-00015 (M20 Component Customer 25)	To Bill	Not yet invoiced
+SAL-ORD-2026-00016 (M20 Component Customer 15)	To Bill	Not yet invoiced
+Sales invoices for SAL-ORD-2026-00015	MISSING (empty `records` array)	No invoice exists to pay against
+Sales invoices for SAL-ORD-2026-00016	MISSING (empty `records` array)	No invoice exists to pay against
+PUR-ORD-2026-00020 (supplier side)	To Bill	Supplier not yet invoiced either
+Purchase invoices for PUR-ORD-2026-00020	MISSING (empty `records` array)	No supplier invoice exists
+
+Observation: Within the retained evidence, there are zero invoice records and zero payment records on either the purchase or sales side.
+
+---
+
+2. Order Value ≠ Payment
+Figure	What It Is	What It Is Not
+160 USD (PUR-ORD-2026-00020: 40 × 4 USD)	Purchase-order line net amount	Not an invoice, not a payment, not a cash outflow
+150 USD (SAL-ORD-2026-00015: 25 × 6 USD)	Sales-order line net amount	Not an invoice, not revenue, not a cash inflow
+90 USD (SAL-ORD-2026-00016: 15 × 6 USD)	Sales-order line net amount	Not an invoice, not revenue, not a cash inflow
+
+Both sales-order values are explicitly scoped as `ORDER_LINE_NET_AMOUNT_NOT_INVOICE_OR_REVENUE` in the retained financials. They represent contractual commitments, not billing or collection events.
+
+---
+
+3. Does the Absence of a Linked Invoice *Prove* No Payment or Advance Exists?
+No — it proves only that the retained evidence contains none.
+
+This is an important distinction:
+
+What the evidence shows: The `sales_invoices` and `purchase_invoices` arrays are empty with status `MISSING`. Both sales orders and the purchase order are "To Bill." No Payment Entry or Journal Entry documents appear anywhere in the retained document list.
+What this does not rule out:
+An advance payment or prepayment could exist as a standalone Payment Entry in the ERP that is not linked to an invoice and therefore would not appear in the invoice-scoped financial records retained here.
+A payment could have been recorded after the retained snapshot time (2026-09-11T05:51:50 UTC).
+A payment could exist in a different ledger, bank system, or payment gateway outside the ERP entirely.
+The retained evidence is scoped to `financials.sales_invoices` and `financials.purchase_invoices` — it does not include a Payment Entry doctype query, an Accounts Receivable report, or a bank reconciliation.
+
+In short: The absence is an *evidence gap*, not a proven negative.
+
+---
+
+4. Fresh Source Checks Required to Confirm Payment Status
+Check	Target	Purpose
+Live Payment Entry query	ERP Payment Entry doctype filtered by SAL-ORD-2026-00015, SAL-ORD-2026-00016, and PUR-ORD-2026-00020	Detect any advance payments, partial payments, or linked payments not captured in the invoice arrays
+Accounts Receivable report	Customer ledger for M20 Component Customer 25 and M20 Component Customer 15	Show outstanding balances, advances, and any unapplied credits
+Accounts Payable report	Supplier ledger for M20 Controller Systems Ltd.	Show whether any payment or advance has been made against PUR-ORD-2026-00020
+Bank reconciliation / GL query	General Ledger entries for the relevant accounts	Detect cash movements that may not yet be linked to orders or invoices
+Sales Invoice creation check	Live Sales Invoice doctype	Confirm whether invoices have been created after the retained snapshot time
+Purchase Invoice creation check	Live Purchase Invoice doctype	Same for the supplier side
+
+None of these checks can be performed from the retained snapshot — they require a live ERP read (`live_source` is currently `false`).
+
+---
+
+Bottom line: Within the retained evidence as of 2026-09-11T05:51:50 UTC, neither customer has been invoiced and no payment records exist. However, the absence of invoices in this snapshot does not conclusively prove that no advance payment or out-of-band payment exists — it only proves the retained evidence contains none. Confirming the true payment status requires live queries against Payment Entries, receivable/payable ledgers, and bank records.
