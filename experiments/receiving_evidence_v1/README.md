@@ -24,6 +24,7 @@ change the project dependencies or lock files.
 ```sh
 python3.12 -m venv /private/tmp/m20-evals-venv
 /private/tmp/m20-evals-venv/bin/python -m pip install \
+  "awscrt==0.36.2" \
   "boto3==1.43.93" \
   "botocore==1.43.93" \
   "pydantic==2.13.5" \

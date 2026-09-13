@@ -459,6 +459,7 @@ class _AttemptTrace:
 
     model_attempts: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     graph_events: list[dict[str, Any]] = field(default_factory=list)
+    agent_messages: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 class StrictWorkflowLedger:
@@ -979,8 +980,11 @@ class SourceReader:
             read_source,
             name=name,
             description=(
-                "Read only the synthetic records matching a non-empty evidence query. "
-                "Optional record_ids narrow the returned records; no approvals or writes exist."
+                "Read only synthetic records. Query terms are whitespace-separated, "
+                "case-insensitive substrings; every term must match a record's canonical JSON. "
+                "The literal term 'all' returns the full source packet after any optional "
+                "record_ids filter. When record_ids is supplied, results are the intersection "
+                "of those IDs and the query match. No approvals or writes exist."
             ),
         )
 
@@ -1183,13 +1187,15 @@ class _TypedSpecialistNode:
             {
                 "task": (
                     "Investigate only your assigned source using its read tool, "
-                    "then return typed literals and separately labeled interpretations."
+                    "then return typed literals and separately labeled interpretations. "
+                    "Set the returned observation actor field exactly to required_actor."
                 ),
                 "case_id": self.case.case_id,
                 "snapshot_id": self.case.snapshot_id,
                 "source_mode": self.case.source_mode,
                 "as_of": self.case.as_of,
                 "question": self.case.question,
+                "required_actor": self.actor,
                 "requested_output_scope": {
                     "quantity_names": self.case.requested_quantity_names,
                     "order_ids": self.case.requested_order_ids,
@@ -1380,7 +1386,6 @@ def pinned_nova_pro_factory(stage: str, max_tokens: int) -> Model:
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=MODEL_REGION)
     return BedrockModel(
         model_id=MODEL_ID,
-        region_name=MODEL_REGION,
         boto_session=session,
         temperature=MODEL_TEMPERATURE,
         max_tokens=max_tokens,
@@ -1490,13 +1495,14 @@ async def _run_single_async(
         {
             "task": (
                 "Investigate the synthetic evidence through the offered read tools "
-                "and return the typed decision."
+                "and return the typed decision. Use required_citation_actor for every citation."
             ),
             "case_id": case.case_id,
             "snapshot_id": case.snapshot_id,
             "source_mode": case.source_mode,
             "as_of": case.as_of,
             "question": case.question,
+            "required_citation_actor": ACTOR_SINGLE,
             "requested_output_scope": {
                 "quantity_names": case.requested_quantity_names,
                 "order_ids": case.requested_order_ids,
@@ -1504,28 +1510,31 @@ async def _run_single_async(
             "prohibitions": ["No approval", "No execution", "No unreturned citations"],
         }
     )
-    async for event in agent.stream_async(
-        prompt,
-        limits=Limits(
-            turns=caps.limits_turns,
-            output_tokens=caps.max_output_tokens,
-            total_tokens=caps.limits_total_tokens,
-        ),
-        structured_output_model=DecisionAnswer,
-    ):
-        if isinstance(event, Mapping) and "result" in event:
-            result = cast(AgentResult, event["result"])
-        events.append(
-            {
-                "event_type": "agent_event",
-                "has_result": "result" in event if isinstance(event, Mapping) else False,
-            }
-        )
-    if result is None or result.structured_output is None:
-        raise InputContractError("single investigator did not return native structured output")
-    answer = DecisionAnswer.model_validate(result.structured_output)
-    reader.validate_answer(answer, allowed_citation_actors={ACTOR_SINGLE})
-    return answer, events, list(model.attempts)
+    try:
+        async for event in agent.stream_async(
+            prompt,
+            limits=Limits(
+                turns=caps.limits_turns,
+                output_tokens=caps.max_output_tokens,
+                total_tokens=caps.limits_total_tokens,
+            ),
+            structured_output_model=DecisionAnswer,
+        ):
+            if isinstance(event, Mapping) and "result" in event:
+                result = cast(AgentResult, event["result"])
+            events.append(
+                {
+                    "event_type": "agent_event",
+                    "has_result": "result" in event if isinstance(event, Mapping) else False,
+                }
+            )
+        if result is None or result.structured_output is None:
+            raise InputContractError("single investigator did not return native structured output")
+        answer = DecisionAnswer.model_validate(result.structured_output)
+        reader.validate_answer(answer, allowed_citation_actors={ACTOR_SINGLE})
+        return answer, events, list(model.attempts)
+    finally:
+        trace_capture.agent_messages[SINGLE_STAGE] = _copy_json(agent.messages)
 
 
 async def _run_graph_async(
@@ -1560,36 +1569,45 @@ async def _run_graph_async(
     coordinator = _TypedCoordinatorNode(
         agent=_coordinator_agent(model=coordinator_model), case=case, reader=reader, gate=gate
     )
-    builder = GraphBuilder()
-    receiving_node = builder.add_node(receiving, node_id=ACTOR_RECEIVING)
-    fulfillment_node = builder.add_node(fulfillment, node_id=ACTOR_FULFILLMENT)
-    coordinator_node = builder.add_node(coordinator, node_id=ACTOR_COORDINATOR)
-    builder.set_entry_point(ACTOR_RECEIVING)
-    builder.set_entry_point(ACTOR_FULFILLMENT)
-    # Both edges are conditional on the actual typed AND gate.  This deliberately
-    # avoids treating Graph's documented incoming-edge OR behavior as a join.
-    builder.add_edge(receiving_node, coordinator_node, condition=gate.ready)
-    builder.add_edge(fulfillment_node, coordinator_node, condition=gate.ready)
-    graph = (
-        builder.set_graph_id("receiving-evidence-fixed-graph-v1")
-        .set_max_node_executions(3)
-        .set_execution_timeout(WORKFLOW_TIMEOUT_SECONDS)
-        .set_node_timeout(WORKFLOW_TIMEOUT_SECONDS)
-        .build()
-    )
-    graph_events = trace_capture.graph_events
-    async for event in graph.stream_async(case.question):
-        graph_events.append(_graph_event_summary(event))
-    if gate.packet is None:
-        raise JoinError("fixed Graph completed without a validated two-specialist JoinPacket")
-    if coordinator.answer is None:
-        raise JoinError("fixed Graph completed without coordinator typed output")
-    attempts = {
-        RECEIVING_STAGE: list(receiving_model.attempts),
-        FULFILLMENT_STAGE: list(fulfillment_model.attempts),
-        COORDINATOR_STAGE: list(coordinator_model.attempts),
-    }
-    return coordinator.answer, graph_events, attempts, gate.packet
+    try:
+        builder = GraphBuilder()
+        receiving_node = builder.add_node(receiving, node_id=ACTOR_RECEIVING)
+        fulfillment_node = builder.add_node(fulfillment, node_id=ACTOR_FULFILLMENT)
+        coordinator_node = builder.add_node(coordinator, node_id=ACTOR_COORDINATOR)
+        builder.set_entry_point(ACTOR_RECEIVING)
+        builder.set_entry_point(ACTOR_FULFILLMENT)
+        # Both edges are conditional on the actual typed AND gate.  This deliberately
+        # avoids treating Graph's documented incoming-edge OR behavior as a join.
+        builder.add_edge(receiving_node, coordinator_node, condition=gate.ready)
+        builder.add_edge(fulfillment_node, coordinator_node, condition=gate.ready)
+        graph = (
+            builder.set_graph_id("receiving-evidence-fixed-graph-v1")
+            .set_max_node_executions(3)
+            .set_execution_timeout(WORKFLOW_TIMEOUT_SECONDS)
+            .set_node_timeout(WORKFLOW_TIMEOUT_SECONDS)
+            .build()
+        )
+        graph_events = trace_capture.graph_events
+        async for event in graph.stream_async(case.question):
+            graph_events.append(_graph_event_summary(event))
+        if gate.packet is None:
+            raise JoinError("fixed Graph completed without a validated two-specialist JoinPacket")
+        if coordinator.answer is None:
+            raise JoinError("fixed Graph completed without coordinator typed output")
+        attempts = {
+            RECEIVING_STAGE: list(receiving_model.attempts),
+            FULFILLMENT_STAGE: list(fulfillment_model.attempts),
+            COORDINATOR_STAGE: list(coordinator_model.attempts),
+        }
+        return coordinator.answer, graph_events, attempts, gate.packet
+    finally:
+        trace_capture.agent_messages.update(
+            {
+                RECEIVING_STAGE: _copy_json(receiving.agent.messages),
+                FULFILLMENT_STAGE: _copy_json(fulfillment.agent.messages),
+                COORDINATOR_STAGE: _copy_json(coordinator.agent.messages),
+            }
+        )
 
 
 def _run_with_timeout(awaitable: Any) -> Any:
@@ -2301,7 +2319,11 @@ def _validate_case_key(case: CaseInput, key: KeyFile) -> None:
 
 
 def _trace_payload(
-    reader: SourceReader, *, model_attempts: Any, graph_events: Sequence[Mapping[str, Any]] = ()
+    reader: SourceReader,
+    *,
+    model_attempts: Any,
+    graph_events: Sequence[Mapping[str, Any]] = (),
+    agent_messages: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "tool_calls": [call.model_dump(mode="json") for call in reader.calls],
@@ -2310,6 +2332,7 @@ def _trace_payload(
         },
         "model_attempts": _copy_json(model_attempts),
         "graph_events": [_copy_json(event) for event in graph_events],
+        "agent_messages": _copy_json(agent_messages or {}),
     }
 
 
@@ -2366,7 +2389,10 @@ def execute_candidate(
                     )
                 )
                 actor_trace = _trace_payload(
-                    reader, model_attempts={SINGLE_STAGE: attempts}, graph_events=events
+                    reader,
+                    model_attempts={SINGLE_STAGE: attempts},
+                    graph_events=events,
+                    agent_messages=trace_capture.agent_messages,
                 )
             elif candidate == "graph":
                 answer, graph_events, attempts, join_packet = _run_with_timeout(
@@ -2379,7 +2405,10 @@ def execute_candidate(
                     )
                 )
                 actor_trace = _trace_payload(
-                    reader, model_attempts=attempts, graph_events=graph_events
+                    reader,
+                    model_attempts=attempts,
+                    graph_events=graph_events,
+                    agent_messages=trace_capture.agent_messages,
                 )
                 actor_trace["validated_join_packet"] = join_packet.model_dump(mode="json")
             else:  # pragma: no cover - Literal and argparse prevent this.
@@ -2400,6 +2429,7 @@ def execute_candidate(
                 reader,
                 model_attempts=trace_capture.model_attempts,
                 graph_events=trace_capture.graph_events,
+                agent_messages=trace_capture.agent_messages,
             )
     finally:
         usage = workflow_ledger.snapshot()

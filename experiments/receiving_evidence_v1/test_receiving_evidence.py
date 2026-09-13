@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 from strands.models import Model
 
@@ -227,6 +228,45 @@ class ReceivingEvidenceTests(unittest.TestCase):
     def _freeze(self) -> dict[str, Any]:
         return experiment.create_freeze_payload_for_verification()
 
+    def test_pinned_nova_factory_uses_pinned_session_with_real_bedrock_constructor(self) -> None:
+        import boto3
+        from strands.models import BedrockModel
+
+        class FakeCredentials:
+            access_key = "offline-access-key"
+            secret_key = "offline-secret-key"
+            token = "offline-session-token"
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.meta = SimpleNamespace(region_name=experiment.MODEL_REGION)
+
+        class FakeSession:
+            region_name = experiment.MODEL_REGION
+
+            def __init__(self) -> None:
+                self.credentials = FakeCredentials()
+                self.client_calls: list[dict[str, Any]] = []
+
+            def get_credentials(self) -> FakeCredentials:
+                return self.credentials
+
+            def client(self, **kwargs: Any) -> FakeClient:
+                self.client_calls.append(kwargs)
+                return FakeClient()
+
+        session = FakeSession()
+        with patch.object(boto3, "Session", return_value=session) as session_constructor:
+            model = experiment.pinned_nova_pro_factory("single", 1024)
+
+        self.assertIsInstance(model, BedrockModel)
+        session_constructor.assert_called_once_with(
+            profile_name="missing20-sandbox", region_name="us-west-2"
+        )
+        self.assertEqual(len(session.client_calls), 1)
+        self.assertEqual(session.client_calls[0]["region_name"], "us-west-2")
+        self.assertEqual(model.client.meta.region_name, "us-west-2")
+
     def _evaluate_single_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         case = _case()
         reader = experiment.SourceReader(case)
@@ -355,6 +395,14 @@ class ReceivingEvidenceTests(unittest.TestCase):
         coordinator_messages = json.dumps(models["coordinator"].calls, sort_keys=True)
         self.assertIn("join_packet", coordinator_messages)
         self.assertNotIn("DEV4-COMPLETELY-UNRELATED-KEY-SENTINEL", coordinator_messages)
+        receiving_prompt = json.loads(
+            models["receiving"].calls[0]["messages"][0]["content"][0]["text"]
+        )
+        fulfillment_prompt = json.loads(
+            models["fulfillment"].calls[0]["messages"][0]["content"][0]["text"]
+        )
+        self.assertEqual(receiving_prompt["required_actor"], experiment.ACTOR_RECEIVING)
+        self.assertEqual(fulfillment_prompt["required_actor"], experiment.ACTOR_FULFILLMENT)
 
     def test_single_investigator_uses_native_read_tool_loop(self) -> None:
         case = _case()
@@ -407,6 +455,33 @@ class ReceivingEvidenceTests(unittest.TestCase):
             ["read_receiving_quality", "read_fulfillment_contract"],
         )
         self.assertTrue(all(call["config"]["max_tokens"] <= 1024 for call in models[0].calls))
+        single_prompt = json.loads(models[0].calls[0]["messages"][0]["content"][0]["text"])
+        self.assertEqual(single_prompt["required_citation_actor"], experiment.ACTOR_SINGLE)
+
+    def test_source_tool_discloses_and_implements_query_contract(self) -> None:
+        reader = experiment.SourceReader(_case("DEV4-split-pending-quality"))
+        tool_spec = reader.tool_for(
+            actor=experiment.ACTOR_SINGLE, source=experiment.SOURCE_FULFILLMENT
+        ).tool_spec
+        description = str(tool_spec["description"])
+        self.assertIn("case-insensitive substrings", description)
+        self.assertIn("literal term 'all'", description)
+        self.assertIn("intersection", description)
+
+        matched = reader.retrieve(
+            actor=experiment.ACTOR_SINGLE,
+            source=experiment.SOURCE_FULFILLMENT,
+            query="SO-D2 pending_evidence",
+            record_ids=["ORD-D2"],
+        )
+        self.assertEqual([record["record_id"] for record in matched["records"]], ["ORD-D2"])
+        all_records = reader.retrieve(
+            actor=experiment.ACTOR_SINGLE,
+            source=experiment.SOURCE_FULFILLMENT,
+            query="all",
+            record_ids=["ORD-D2"],
+        )
+        self.assertEqual([record["record_id"] for record in all_records["records"]], ["ORD-D2"])
 
     def test_evaluator_rejects_swapped_quantity_name(self) -> None:
         payload = _answer(_case(), citation_actor="single_investigator")
@@ -554,6 +629,39 @@ class ReceivingEvidenceTests(unittest.TestCase):
         self.assertEqual(attempts[-1]["error"]["type"], "RuntimeError")
         self.assertEqual(record["usage"]["requests"], 2)
         self.assertEqual(record["usage"]["actual_output_tokens"], 1025)
+        self.assertIn(
+            "read_receiving_quality",
+            json.dumps(record["actor_trace"]["agent_messages"]["single"], sort_keys=True),
+        )
+
+    def test_failed_single_retains_native_validation_feedback_in_private_trace(self) -> None:
+        case = _case()
+
+        def factory(stage: str, _: int) -> Model:
+            self.assertEqual(stage, "single")
+            return ScriptedLocalModel(
+                [
+                    ("structured", {}),
+                    ("raise", "stop after native structured-output validation feedback"),
+                ]
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = experiment.execute_candidate(
+                case=case,
+                key=_key(),
+                candidate="single",
+                model_factory=factory,
+                freeze_manifest=self._freeze(),
+                durable_ledger=experiment.DurableExperimentLedger(root / "ledger.jsonl"),
+                run_log=root / "runs.jsonl",
+            )
+
+        self.assertEqual(record["status"], "FAILED")
+        rendered = json.dumps(record["actor_trace"]["agent_messages"]["single"], sort_keys=True)
+        self.assertIn("Validation failed for", rendered)
+        self.assertIn("toolResult", rendered)
 
     def test_blinded_export_hides_candidate_provider_and_actor_names(self) -> None:
         case = _case()
