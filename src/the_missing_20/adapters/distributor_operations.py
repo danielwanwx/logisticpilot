@@ -665,8 +665,12 @@ class DistributorOperations:
                 )
                 self._store_photo_analysis(attachment_id, analysis)
                 return self._projection(state, source)
+            reader_model_id = self._photo_reader_model_id(reader)
             cached = self._cached_photo_analysis(
-                digest=digest, source_revision=source_revision, linked_lot=lot_name
+                digest=digest,
+                source_revision=source_revision,
+                linked_lot=lot_name,
+                reader_model_id=reader_model_id,
             )
             if cached is not None:
                 self._store_photo_analysis(attachment_id, cached)
@@ -681,6 +685,7 @@ class DistributorOperations:
                     source_revision=source_revision,
                     linked_lot=lot_name,
                     linked_quantity=linked_quantity,
+                    reader_model_id=reader_model_id,
                 )
             except Exception:
                 analysis = self._unavailable_photo_analysis(
@@ -4321,6 +4326,7 @@ class DistributorOperations:
         source_revision: str,
         linked_lot: object,
         linked_quantity: object,
+        reader_model_id: str | None,
     ) -> dict[str, object]:
         if not isinstance(result, Mapping):
             raise ValueError("photo reader result is malformed")
@@ -4366,6 +4372,7 @@ class DistributorOperations:
         )
         return {
             "status": "COMPLETE",
+            "_cache_reader_model_id": reader_model_id,
             "assessment": assessment.model_dump(mode="json"),
             "model": self._optional_photo_text(result.get("model")),
             "provider": self._optional_photo_text(result.get("provider")),
@@ -4424,7 +4431,12 @@ class DistributorOperations:
         }
 
     def _cached_photo_analysis(
-        self, *, digest: str, source_revision: str, linked_lot: object
+        self,
+        *,
+        digest: str,
+        source_revision: str,
+        linked_lot: object,
+        reader_model_id: str | None,
     ) -> dict[str, object] | None:
         selected_lot = _text(linked_lot, "linked photo lot") if linked_lot is not None else None
         rows = self._db.execute(
@@ -4444,9 +4456,17 @@ class DistributorOperations:
                 and analysis.get("attachment_sha256") == digest
                 and analysis.get("source_revision") == source_revision
                 and analysis.get("linked_lot") == selected_lot
+                and analysis.get("_cache_reader_model_id") == reader_model_id
             ):
                 return analysis
         return None
+
+    @staticmethod
+    def _photo_reader_model_id(reader: Callable[[bytes], Mapping[str, object]]) -> str | None:
+        """Use a configured reader model as part of the durable de-duplication key."""
+
+        model_id = getattr(reader, "model_id", None)
+        return model_id.strip() if isinstance(model_id, str) and model_id.strip() else None
 
     def _store_photo_analysis(self, attachment_id: str, analysis: Mapping[str, object]) -> None:
         updated = self._db.execute(
@@ -4473,6 +4493,7 @@ class DistributorOperations:
         )
         analysis = _decoded(raw_analysis, "photo analysis") if raw_analysis is not None else None
         if analysis is not None:
+            analysis.pop("_cache_reader_model_id", None)
             analysis["advisory_current"] = (
                 analysis.get("status") == "COMPLETE"
                 and current_source_revision is not None

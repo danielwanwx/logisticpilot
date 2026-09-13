@@ -2,6 +2,11 @@
 
 Date: September 13, 2026. Base: `e9854d8`.
 
+**Later same-day follow-up:** AWS authentication recovered and the real photo,
+cited economic decision and approved 20-unit ERP dispatch were exercised on
+this same PO24 case. See [the live acceptance](2026-09-13-photo-intake-live-acceptance.md).
+The blocked run below remains a historical record, including its failed calls.
+
 **Status: implemented and checked offline; positive real-model acceptance is
 blocked by expired AWS credentials.** Browser upload and the real API's
 unavailable/retry path were exercised. No successful image interpretation or

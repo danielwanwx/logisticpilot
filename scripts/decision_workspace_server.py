@@ -3006,6 +3006,12 @@ class DecisionWorkspaceServer(ThreadingHTTPServer):
             operations_photo_analysis = (
                 photo_values.get("MISSING20_OPERATIONS_PHOTO_ANALYSIS", "0") == "1"
             )
+            operations_photo_model_id = (
+                photo_values.get(
+                    "MISSING20_OPERATIONS_PHOTO_MODEL_ID", "us.amazon.nova-pro-v1:0"
+                ).strip()
+                or "us.amazon.nova-pro-v1:0"
+            )
             if (
                 operations_photo_analysis
                 and distributor_settings.agent_provider is not AgentProvider.BEDROCK
@@ -3021,7 +3027,9 @@ class DecisionWorkspaceServer(ThreadingHTTPServer):
                 allocation_selector=distributor_allocation_selector,
                 economic_selector=distributor_economic_selector,
                 photo_reader=(
-                    StrandsPhotoReader(distributor_settings) if operations_photo_analysis else None
+                    StrandsPhotoReader(distributor_settings, model_id=operations_photo_model_id)
+                    if operations_photo_analysis
+                    else None
                 ),
                 retained_projection=(
                     photo_values.get("MISSING20_DISTRIBUTOR_RETAINED_PROJECTION", "0") == "1"

@@ -1,8 +1,8 @@
 # LogisticPilot
 
-Newest acceptance: [economic decision → ERP dispatch](docs/audits/2026-09-13-economic-poc-acceptance.md). An isolated 25-unit order now has a real Bedrock comparison and an approved 20-unit native ERP dispatch, with 5 units still held. The $24.80 postage difference is a conditional estimate, not realized savings.
+Economic baseline acceptance: [economic decision → ERP dispatch](docs/audits/2026-09-13-economic-poc-acceptance.md). An isolated 25-unit order now has a real Bedrock comparison and an approved 20-unit native ERP dispatch, with 5 units still held. The $24.80 postage difference is a conditional estimate, not realized savings.
 
-Photo intake update: [implementation and verification status](docs/audits/2026-09-13-photo-intake-acceptance.md). The operations page now connects uploaded photos to the real image reader and ERP lot scope. Browser upload/error handling and offline checks passed; positive live image acceptance is pending AWS reauthentication. The original five-unit hold was a synthetic inspection input, not a photo finding.
+Photo intake update: [live photo → cited decision → approved ERP dispatch](docs/audits/2026-09-13-photo-intake-live-acceptance.md). On isolated PO24 / SO18, real Opus identified visible carton damage; the economic agent cited that observation, and browser approval produced a 20-unit native ERP dispatch with 5 units still awaiting inspection. No B5 failure was entered. The public photograph is a labeled POC input, and the five-unit hold comes from receiving policy, not inferred carton contents. The audit preserves Nova's missed damage and the limited two-image comparison. This demo explicitly sets `MISSING20_OPERATIONS_PHOTO_MODEL_ID=us.anthropic.claude-opus-4-6-v1`; the default remains Nova Pro.
 
 Earlier release evidence: [PO20 claim manifest](docs/submission/current-claim-manifest.md) · [strict judge review](docs/audits/2026-09-13-award-readiness.md). Older invoice and multi-agent results remain separate cases.
 

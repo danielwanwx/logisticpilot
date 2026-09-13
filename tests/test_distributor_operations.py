@@ -314,7 +314,11 @@ def _photo_png(*, color: tuple[int, int, int]) -> bytes:
 
 
 def _photo_reader_result(
-    *, visibility: str = "clear", visible_condition: str = "visible_damage", lot: str = ""
+    *,
+    visibility: str = "clear",
+    visible_condition: str = "visible_damage",
+    lot: str = "",
+    model: str = "offline-photo-reader",
 ) -> dict[str, object]:
     return {
         "assessment": {
@@ -335,7 +339,7 @@ def _photo_reader_result(
             if visibility != "clear"
             else "",
         },
-        "model": "offline-photo-reader",
+        "model": model,
         "provider": "bedrock",
         "transport": "strands_multimodal",
         "stages": [{"stage": "visibility"}],
@@ -2212,6 +2216,56 @@ def test_photo_analysis_is_advisory_cached_and_keeps_operator_lot_scope(tmp_path
     state = service._latest_state() or service._initial_state()
     current_snapshot = service._economic_operational_snapshot(state, service._read_source())
     assert current_snapshot["photo_observations"] == []
+
+
+def test_photo_analysis_cache_is_bound_to_configured_reader_model(tmp_path: Path) -> None:
+    class Reader:
+        def __init__(self, model_id: str) -> None:
+            self.model_id = model_id
+            self.calls = 0
+
+        def __call__(self, _image: bytes) -> Mapping[str, object]:
+            self.calls += 1
+            return _photo_reader_result(model=self.model_id)
+
+    config = _component_config()
+    bridge = _Bridge(config)
+    nova = Reader("us.amazon.nova-pro-v1:0")
+    service = DistributorOperations(
+        tmp_path / "photo-model-cache.sqlite3", config, bridge, photo_reader=nova
+    )
+    bridge.state_provider = service._latest_state
+    image = base64.b64encode(_photo_png(color=(170, 20, 20))).decode("ascii")
+    service.attach_photo(
+        {"attachment_id": "photo-model-a", "media_type": "image/png", "image": image}
+    )
+    first = service.analyze_photo({"attachment_id": "photo-model-a", "lot": "LOT-B"})
+    first_photo = cast(list[Mapping[str, object]], first["photo_attachments"])[0]
+    assert cast(Mapping[str, object], first_photo["analysis"])["model"] == nova.model_id
+    assert nova.calls == 1
+
+    opus = Reader("us.anthropic.claude-opus-4-6-v1")
+    service._photo_reader = opus
+    changed = service.analyze_photo({"attachment_id": "photo-model-a", "lot": "LOT-B"})
+    changed_photo = cast(list[Mapping[str, object]], changed["photo_attachments"])[0]
+    changed_analysis = cast(Mapping[str, object], changed_photo["analysis"])
+    assert changed_analysis["model"] == opus.model_id
+    assert "_cache_reader_model_id" not in changed_analysis
+    assert opus.calls == 1
+
+    service.attach_photo(
+        {"attachment_id": "photo-model-b", "media_type": "image/png", "image": image}
+    )
+    cached = service.analyze_photo({"attachment_id": "photo-model-b", "lot": "LOT-B"})
+    cached_photo = next(
+        row
+        for row in cast(list[Mapping[str, object]], cached["photo_attachments"])
+        if row["attachment_id"] == "photo-model-b"
+    )
+    assert cast(Mapping[str, object], cached_photo["analysis"])["model"] == opus.model_id
+    assert nova.calls == 1
+    assert opus.calls == 1
+    assert bridge.calls == []
 
 
 def test_photo_analysis_retake_unavailable_and_invalid_lot_are_safe(tmp_path: Path) -> None:

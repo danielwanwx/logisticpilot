@@ -3398,9 +3398,9 @@
     const recommendationLabel = document.createElement("strong"); recommendationLabel.textContent = `Recommendation${recommendation.code ? ` · ${pretty(recommendation.code)}` : ""}: `;
     recommendationNode.append(recommendationLabel, document.createTextNode(recommendation.message)); section.append(recommendationNode);
     const nextPhoto = firstText(assessment, ["next_photo"]);
-    if ((recommendation.code === "RETAKE" || condition === "unclear") && nextPhoto) {
+    if (status === "COMPLETE" && nextPhoto) {
       const guidance = document.createElement("p"); guidance.className = "ops-photo-analysis-note";
-      const guidanceLabel = document.createElement("strong"); guidanceLabel.textContent = "Retake guidance: ";
+      const guidanceLabel = document.createElement("strong"); guidanceLabel.textContent = recommendation.code === "RETAKE" ? "Retake guidance: " : "Suggested next photo: ";
       guidance.append(guidanceLabel, document.createTextNode(nextPhoto)); section.append(guidance);
     }
     const scope = document.createElement("p"); scope.className = "ops-photo-analysis-scope";
@@ -3539,7 +3539,7 @@
       const preview = document.createElement("button"); preview.type = "button"; preview.className = "ops-photo-open";
       const image = document.createElement("img");
       image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(photo.attachment_id))}`;
-      image.alt = "Operator-attached operational evidence; not analyzed";
+      image.alt = "Operator-attached receiving photo; visible evidence only";
       image.loading = "lazy"; preview.append(image);
       preview.setAttribute("aria-label", "Expand attached photo");
       preview.addEventListener("click", () => {
