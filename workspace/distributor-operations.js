@@ -39,12 +39,10 @@
     ],
   };
   const STAGES = [
-    { key: "arrival", label: "Received", icon: "ph-package", metric: "received", detail: "Source receipt" },
-    { key: "inspection", label: "Inspection", icon: "ph-seal-check", metric: "usable", detail: "Quality evidence" },
-    { key: "allocation", label: "Allocated", icon: "ph-users-three", metric: "allocated", detail: "Customer demand" },
-    { key: "picked", label: "Picked", icon: "ph-hand-grabbing", metric: "picked", detail: "Actual picked input" },
-    { key: "dispatch", label: "Dispatched", icon: "ph-truck", metric: "dispatched", detail: "Native dispatch" },
-    { key: "delivery", label: "Delivery confirmed", icon: "ph-check-circle", metric: "delivery_confirmed", detail: "Explicit evidence" },
+    { key: "arrival", label: "Receiving", icon: "ph-package", metric: "received", detail: "Source receipt" },
+    { key: "inspection", label: "Quality", icon: "ph-seal-check", metric: "usable", detail: "Quality evidence" },
+    { key: "allocation", label: "Allocation", icon: "ph-users-three", metric: "allocated", detail: "Customer demand" },
+    { key: "dispatch", label: "Dispatch", icon: "ph-truck", metric: "dispatched", detail: "Native dispatch" },
   ];
 
   const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -95,7 +93,7 @@
         ?? record.live_inference
         ?? record.capability;
       const state = isRecord(candidate) ? (candidate.status ?? candidate.state ?? candidate.value) : candidate;
-      if (state === true || /^(AVAILABLE|LIVE|READY|ENABLED|TRUE)$/i.test(text(state))) return "live inference available";
+      if (state === true || /^(AVAILABLE|LIVE|READY|ENABLED|TRUE)$/i.test(text(state))) return "Agent inference capability available";
     }
     return "";
   };
@@ -610,7 +608,9 @@
       return { current: picked > 0 ? `${formatNumber(picked)} picked cumulatively` : "Picked evidence pending", cumulative: picked > 0 ? `Recorded in current case · ${unit}` : stage.detail, complete: picked > 0 || pickedEvidenceRecorded(next) };
     }
     if (stage.key === "delivery") {
-      const label = finite(current) ? `${formatNumber(current)} recorded ${next.synthetic_input === true ? "synthetic " : ""}confirmations` : "Delivery confirmation unknown";
+      const label = finite(current)
+        ? next.synthetic_input === true ? `${formatNumber(current)} declared synthetic carrier confirmations` : `${formatNumber(current)} recorded confirmations`
+        : "Delivery confirmation unknown";
       return { current: label, cumulative: finite(ordered) ? `${formatNumber(current)} / ${formatNumber(ordered)} ${unit}` : stage.detail, complete: finite(current) && current > 0 };
     }
     if (stage.key === "dispatch") {
@@ -707,6 +707,79 @@
       .trim();
   }
 
+  function markdownTableCells(value) {
+    const line = text(value);
+    if (!line.includes("|")) return null;
+    const trimmed = line.replace(/^\|/, "").replace(/\|$/, "");
+    const cells = trimmed.split("|").map((cell) => cell.trim());
+    return cells.length >= 2 ? cells : null;
+  }
+
+  function markdownTableDivider(value) {
+    const cells = markdownTableCells(value);
+    return Boolean(cells && cells.every((cell) => /^:?-{3,}:?$/.test(cell)));
+  }
+
+  function markdownBlocks(value) {
+    const answer = typeof value === "string" ? value.trim() : "";
+    if (!answer) return [];
+    const lines = answer.replace(/\r\n?/g, "\n").split("\n");
+    const blocks = [];
+    let paragraph = [];
+    const flushParagraph = () => {
+      if (!paragraph.length) return;
+      blocks.push({ type: "paragraph", text: paragraph.join(" ") });
+      paragraph = [];
+    };
+    for (let index = 0; index < lines.length;) {
+      const line = lines[index];
+      const trimmed = line.trim();
+      if (!trimmed) {
+        flushParagraph();
+        index += 1;
+        continue;
+      }
+      const heading = trimmed.match(/^(#{1,3})\s+(.+?)\s*$/);
+      if (heading) {
+        flushParagraph();
+        blocks.push({ type: "heading", level: heading[1].length, text: heading[2].replace(/\s+#+\s*$/, "") });
+        index += 1;
+        continue;
+      }
+      const header = markdownTableCells(trimmed);
+      if (header && index + 1 < lines.length && markdownTableDivider(lines[index + 1])) {
+        flushParagraph();
+        const rows = [];
+        index += 2;
+        while (index < lines.length) {
+          const row = markdownTableCells(lines[index]);
+          if (!row || row.length !== header.length) break;
+          rows.push(row);
+          index += 1;
+        }
+        blocks.push({ type: "table", headers: header, rows });
+        continue;
+      }
+      const bullet = trimmed.match(/^[-*+]\s+(.+)$/);
+      if (bullet) {
+        flushParagraph();
+        const items = [];
+        while (index < lines.length) {
+          const item = lines[index].trim().match(/^[-*+]\s+(.+)$/);
+          if (!item) break;
+          items.push(item[1]);
+          index += 1;
+        }
+        blocks.push({ type: "list", items });
+        continue;
+      }
+      paragraph.push(trimmed);
+      index += 1;
+    }
+    flushParagraph();
+    return blocks;
+  }
+
   function statusTone(value) {
     const status = text(value).toUpperCase();
     if (/HOLD|FAIL|ERROR|UNKNOWN|UNAVAILABLE|MISSING|CONFLICT|REJECT/.test(status)) return "coral";
@@ -768,12 +841,93 @@
     const openAlerts = Array.isArray(next.alerts)
       ? next.alerts.filter((alert) => isRecord(alert) && firstText(alert, ["status", "state"]).toUpperCase() === "OPEN").length
       : 0;
-    return `Delivery confirmed · ${openAlerts} alert${openAlerts === 1 ? "" : "s"} to review`;
+    const completion = next.synthetic_input === true ? "Carrier confirmation declared" : "Delivery confirmed";
+    return `${completion} · ${openAlerts} alert${openAlerts === 1 ? "" : "s"} to review`;
+  }
+
+  function evidenceStatusLabel(next) {
+    if (!isRecord(next)) return "EVIDENCE SOURCE LOADING";
+    const evidenceMode = isRecord(next.evidence_mode) ? next.evidence_mode : {};
+    const modeStatus = text(evidenceMode.status).toUpperCase();
+    if (isRetainedEvidence(evidenceMode)) {
+      const asOf = text(evidenceMode.as_of);
+      return Number.isFinite(Date.parse(asOf))
+        ? `RETAINED EVIDENCE · as of ${formatDate(asOf)}`
+        : "RETAINED EVIDENCE";
+    }
+    if (modeStatus.includes("UNAVAILABLE") || projectionSourceState(next) === "SOURCE_UNAVAILABLE") return "SOURCE UNAVAILABLE";
+    if (projectionSourceState(next) === "DISABLED") return "OPERATION NOT CONFIGURED";
+    if (modeStatus === "CURRENT") return "CURRENT ERP PROJECTION";
+    return next.available === true ? "EVIDENCE FRESHNESS UNKNOWN" : "EVIDENCE SOURCE LOADING";
+  }
+
+  function agentProviderDisplay(next) {
+    const conversation = isRecord(next?.conversation) ? next.conversation : {};
+    const status = (firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
+    const provider = firstProvider(conversation, ["provider_label", "provider", "model"])
+      || firstProvider(next, ["conversation_provider", "provider", "model"]);
+    return provider || (/UNAVAILABLE|ERROR|FAILED|DISABLED/.test(status) ? "Unavailable" : "Ask agent");
+  }
+
+  function carrierConfirmationLabel(next, confirmation = quantity(next, "delivery_confirmed"), requested = quantity(next, "ordered")) {
+    const confirmed = finite(confirmation) ? formatNumber(confirmation) : "Unknown";
+    const target = finite(requested) ? ` / ${formatNumber(requested)}` : "";
+    return next?.synthetic_input === true
+      ? `Carrier confirmation declared ${confirmed}${target}`
+      : `Delivery confirmation recorded ${confirmed}${target}`;
+  }
+
+  function sameCurrencyLineTotal(orders) {
+    if (!Array.isArray(orders) || !orders.length) return null;
+    let currency = "";
+    let amount = 0;
+    for (const order of orders) {
+      const line = isRecord(order?.line) ? order.line : {};
+      const lineAmount = numberFrom(line.net_amount);
+      const lineCurrency = text(order?.currency);
+      if (!finite(lineAmount) || !lineCurrency) return null;
+      if (currency && currency !== lineCurrency) return null;
+      currency = lineCurrency;
+      amount += lineAmount;
+    }
+    return { amount, currency };
+  }
+
+  function orderValueDetails(next) {
+    const financials = normalizeFinancials(next?.financials);
+    const purchaseOrder = financials.purchase_order;
+    const total = purchaseOrder ? sameCurrencyLineTotal([purchaseOrder]) : null;
+    if (!isRecord(next) || next.available !== true || financials.status !== "CURRENT" || !total) {
+      return {
+        value: "Unavailable",
+        label: "Purchase order line amount unavailable",
+        note: "No amount is inferred when the accepted source does not provide a purchase order line amount.",
+      };
+    }
+    const retained = isRetainedEvidence(next.evidence_mode);
+    return {
+      value: formatMoney(total.amount, total.currency),
+      label: retained ? "Retained purchase order line amount" : "Purchase order line amount",
+      note: retained
+        ? "Retained accepted ERP evidence. CURRENT means the amount was available in that recorded snapshot, not a fresh source read. Order value only; not revenue, invoice, or payment."
+        : "Current ERP source order line amount. Order value only; not revenue, invoice, or payment.",
+    };
+  }
+
+  function allocationDigest(next) {
+    if (!Array.isArray(next?.allocations)) return "Unknown";
+    const rows = next.allocations.map((allocation) => {
+      const order = firstText(allocation, ["customer_order", "sales_order", "order_name", "order", "name"]);
+      const allocated = numberFromKeys(allocation, ["allocated", "reserved", "reservation_quantity"]);
+      return order && finite(allocated) ? `${order} ${formatNumber(allocated)}` : "";
+    }).filter(Boolean);
+    return rows.length ? rows.join(" · ") : "Unknown";
   }
 
   const exported = {
     buildEventPayload,
     cleanAnswer,
+    markdownBlocks,
     conversationAnswer,
     providerLabel,
     retainConversationProjection,
@@ -815,6 +969,13 @@
     deliverySummary,
     arrivalQuantitySummary,
     deliveryCompletionLabel,
+    evidenceStatusLabel,
+    agentProviderDisplay,
+    carrierConfirmationLabel,
+    sameCurrencyLineTotal,
+    orderValueDetails,
+    allocationDigest,
+    recentActivityEvents,
     unwrapProjection,
     projectionSourceState,
     proposalActionDetail,
@@ -844,6 +1005,7 @@
   let preparedProposal = null;
   let selectedPhoto = null;
   let photoPreviewUrl = "";
+  let evidenceDrawerTrigger = null;
 
   function setText(id, value) {
     const node = $(id);
@@ -856,21 +1018,26 @@
     if (dot) dot.className = `status-dot status-dot-${tone}`;
   }
   function renderRefreshState({ retryPending = false } = {}) {
-    const retainedLabel = retainedEvidenceLabel(projection?.evidence_mode, projection);
-    if (retainedLabel) {
-      setText("ops-refresh-state", retainedLabel);
-      return;
-    }
-    const prefix = retryPending ? "Source retry pending · " : "Last successful source refresh · ";
-    const value = lastProjectionAt ? formatDate(lastProjectionAt) : "none yet";
-    setText("ops-refresh-state", `${prefix}${value}`);
+    const status = evidenceStatusLabel(projection);
+    setText("ops-evidence-retention", status);
+    setText("ops-refresh-state", retryPending ? `Source retry pending · ${status}` : status);
   }
   function showSourceError(error, { configuredSourceFailure = false } = {}) {
+    const retained = isRetainedEvidence(projection?.evidence_mode);
     sourceState.hidden = false;
-    setText("ops-source-title", "Current operation source unavailable");
-    setText("ops-source-detail", error?.message || "The source did not return a usable projection. Quantities are unknown.");
-    setConnection("Unavailable", "danger");
-    renderRefreshState({ retryPending: Boolean(lastProjectionAt) });
+    setText("ops-source-title", retained ? "Retained operation evidence remains available" : "Current operation source unavailable");
+    setText("ops-source-detail", retained
+      ? "The retained as-of projection remains visible; fresh operation facts were not requested or inferred."
+      : error?.message || "The source did not return a usable projection. Quantities are unknown.");
+    setConnection(retained ? "Retained evidence" : "Unavailable", retained ? "cyan" : "danger");
+    if (retained) {
+      renderRefreshState({ retryPending: Boolean(lastProjectionAt) });
+    } else {
+      setText("ops-evidence-retention", "SOURCE UNAVAILABLE");
+      setText("ops-refresh-state", "SOURCE UNAVAILABLE · current facts are not available");
+      document.body.dataset.operationsState = "unavailable";
+      renderUnavailablePresentation();
+    }
     if (!projection || configuredSourceFailure) {
       content.hidden = true;
       disabled.hidden = false;
@@ -884,7 +1051,7 @@
   function clearSourceError() {
     sourceState.hidden = true;
     const retained = Boolean(retainedEvidenceLabel(projection?.evidence_mode, projection));
-    setConnection(retained ? "Retained evidence" : "Live source", retained ? "cyan" : "lime");
+    setConnection(retained ? "Retained evidence" : "Current ERP projection", retained ? "cyan" : "lime");
     renderRefreshState();
     updateEventButton();
     syncFreshEventControls(projection);
@@ -924,17 +1091,185 @@
     if (cartonsNode) cartonsNode.textContent = cartons;
     cartonsCard?.classList.toggle("is-unknown", cartons === "Unknown");
     for (const key of ["ordered", "received", "usable", "held", "missing", "allocated", "dispatched", "delivery_confirmed"]) {
-      setQuantityCard(key, quantity(next, key), key === "delivery_confirmed" ? "explicit event" : key === "allocated" && allocationPending ? "proposed plan" : unit);
+      setQuantityCard(key, quantity(next, key), key === "delivery_confirmed"
+        ? next.synthetic_input === true ? "declared carrier event" : "explicit event"
+        : key === "allocated" && allocationPending ? "proposed plan" : unit);
     }
     const allocatedLabel = $("ops-quantity-allocated-label");
     if (allocatedLabel) allocatedLabel.textContent = allocationPending ? "Proposed allocation" : "Allocated";
+    setText("ops-quantity-delivery-confirmed-label", next.synthetic_input === true ? "Carrier confirmation declared" : "Delivery confirmation");
     setText("ops-uom-note", text(q.uom)
       ? `Parts are shown in stock UOM ${q.uom}; cartons remain a separate outer-package observation.`
       : "Stock UOM is not confirmed; cartons and part quantities remain separate observations.");
   }
+
+  function purchaseOrderRecord(next) {
+    return Array.isArray(next?.documents)
+      ? next.documents.find((record) => /^purchase order$/i.test(firstText(record, ["kind", "doctype", "type"]))) || null
+      : null;
+  }
+
+  function purchaseOrderIdentifier(next) {
+    const purchaseOrder = purchaseOrderRecord(next);
+    return purchaseOrder ? firstText(purchaseOrder, ["name", "record_id", "id"]) : "";
+  }
+
+  function renderHero(next) {
+    const unit = text(next?.quantities?.uom) || "units";
+    const received = quantity(next, "received");
+    const dispatched = quantity(next, "dispatched");
+    const purchaseOrder = purchaseOrderIdentifier(next);
+    const available = next?.available === true;
+    const title = !available
+      ? "Operation facts unavailable"
+      : finite(received) && finite(dispatched)
+        ? `Receiving ${formatNumber(received)} · Dispatch ${formatNumber(dispatched)}`
+        : finite(received)
+          ? `Receiving ${formatNumber(received)} ${unit}`
+          : finite(dispatched)
+            ? `Dispatch ${formatNumber(dispatched)} ${unit}`
+            : "Order facts awaiting source evidence";
+    const copy = !available
+      ? "The source did not return current operation facts. Quantities and order value are unknown."
+      : isRetainedEvidence(next?.evidence_mode)
+        ? "Accepted facts are retained as of the recorded source time; fresh operations are disabled."
+        : "The accepted projection supplies each quantity, commitment, and dispatch fact shown here.";
+    setText("ops-hero-context", purchaseOrder ? `Order journey · ${purchaseOrder}` : "Evidence-led order operations");
+    setText("ops-title", title);
+    setText("ops-hero-copy", copy);
+    setText("ops-hero-case", next?.case_id || "Case unavailable");
+    setText("ops-hero-state", evidenceStatusLabel(next));
+  }
+
+  function renderOrderValue(next) {
+    const details = orderValueDetails(next);
+    const dispatched = quantity(next, "dispatched");
+    const confirmed = quantity(next, "delivery_confirmed");
+    setText("ops-order-value", details.value);
+    setText("ops-order-value-label", details.label);
+    setText("ops-order-dispatch", finite(dispatched) ? `Dispatch ${formatNumber(dispatched)}` : "Unknown");
+    setText("ops-order-allocations", allocationDigest(next));
+    const confirmation = finite(confirmed)
+      ? `${carrierConfirmationLabel(next, confirmed, quantity(next, "ordered"))}${next?.synthetic_input === true ? "; declared synthetic carrier confirmation, not independently verified receipt." : "."}`
+      : "Delivery confirmation is unavailable from the accepted source.";
+    setText("ops-order-value-note", `${details.note} ${confirmation}`);
+  }
+
+  function appendEvidenceDrawerFact(parent, label, value, href = "") {
+    const row = document.createElement("div");
+    const title = document.createElement("strong"); title.textContent = label;
+    const safeLink = safeHref(href);
+    const detail = safeLink ? document.createElement("a") : document.createElement("span");
+    detail.textContent = value;
+    if (safeLink) {
+      detail.href = safeLink;
+      detail.target = "_blank";
+      detail.rel = "noopener noreferrer";
+    }
+    row.append(title, detail);
+    parent.append(row);
+  }
+
+  function renderEvidenceDrawer(next) {
+    const list = $("ops-evidence-drawer-facts");
+    if (!list) return;
+    const unit = text(next?.quantities?.uom) || "units";
+    const received = quantity(next, "received");
+    const dispatched = quantity(next, "dispatched");
+    const confirmed = quantity(next, "delivery_confirmed");
+    const photos = photoAttachmentList(next);
+    const purchaseOrderRecordValue = purchaseOrderRecord(next);
+    const purchaseOrder = purchaseOrderIdentifier(next);
+    setText("ops-evidence-drawer-status", evidenceStatusLabel(next));
+    list.replaceChildren();
+    appendEvidenceDrawerFact(list, "Case", next?.case_id || "Case identifier unavailable");
+    appendEvidenceDrawerFact(list, "Purchase order", purchaseOrder || "Purchase order unavailable", purchaseOrderRecordValue?.url || purchaseOrderRecordValue?.href);
+    appendEvidenceDrawerFact(list, "Evidence state", evidenceStatusLabel(next));
+    appendEvidenceDrawerFact(list, "Receiving", finite(received) ? `${formatNumber(received)} ${unit}` : "Unknown");
+    appendEvidenceDrawerFact(list, "Dispatch", finite(dispatched) ? `${formatNumber(dispatched)} ${unit}` : "Unknown");
+    appendEvidenceDrawerFact(list, "Carrier confirmation", finite(confirmed)
+      ? carrierConfirmationLabel(next, confirmed, quantity(next, "ordered"))
+      : "Unknown");
+    appendEvidenceDrawerFact(list, "Photo evidence", photos.length
+      ? `${photos.length} attached receiving evidence photo${photos.length === 1 ? "" : "s"}; manual photo · not analyzed.`
+      : "No same-case source-backed photo is available.");
+    groupHandoffs(next?.handoffs).forEach((group) => {
+      const latest = group.latest;
+      appendEvidenceDrawerFact(
+        list,
+        `${group.provider} readback`,
+        latest.record_id || `${pretty(latest.status || "Status unavailable")} record`,
+        latest.safe_url,
+      );
+    });
+  }
+
+  function openEvidenceDrawer(trigger) {
+    const drawer = $("ops-evidence-drawer");
+    const backdrop = $("ops-evidence-drawer-backdrop");
+    if (!drawer || !backdrop) return;
+    evidenceDrawerTrigger = trigger || document.activeElement;
+    renderEvidenceDrawer(projection || normalizeProjection({}));
+    backdrop.hidden = false;
+    drawer.hidden = false;
+    document.body.classList.add("has-evidence-drawer");
+    $("ops-open-evidence-drawer")?.setAttribute("aria-expanded", "true");
+    window.requestAnimationFrame(() => $("ops-evidence-drawer-close")?.focus());
+  }
+
+  function closeEvidenceDrawer() {
+    const drawer = $("ops-evidence-drawer");
+    const backdrop = $("ops-evidence-drawer-backdrop");
+    if (!drawer || drawer.hidden) return;
+    drawer.hidden = true;
+    if (backdrop) backdrop.hidden = true;
+    document.body.classList.remove("has-evidence-drawer");
+    $("ops-open-evidence-drawer")?.setAttribute("aria-expanded", "false");
+    const trigger = evidenceDrawerTrigger;
+    evidenceDrawerTrigger = null;
+    if (trigger && document.contains(trigger) && typeof trigger.focus === "function") trigger.focus();
+  }
+
+  function openFullOperationsEvidence() {
+    closeEvidenceDrawer();
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "operations");
+    url.hash = "ops-details";
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    setOpsView("operations", { scrollTarget: "ops-details" });
+  }
+
+  function renderUnavailablePresentation() {
+    const unavailable = normalizeProjection({
+      available: false,
+      case_id: projection?.case_id || "",
+      stage: "SOURCE_UNAVAILABLE",
+      evidence_mode: { status: "UNAVAILABLE" },
+      quantities: {},
+      allocations: [],
+      alerts: [],
+      events: [],
+      documents: [],
+      available_event_templates: [],
+    });
+    renderHero(unavailable);
+    renderQuantities(unavailable);
+    renderStages(unavailable);
+    renderBenchmark(unavailable);
+    renderOrderValue(unavailable);
+    renderEvidenceDrawer(unavailable);
+    setText("ops-flow-message", "Current operation facts are unavailable. No quantity or delivery value is retained as current.");
+    const stageBadge = $("ops-stage-badge");
+    if (stageBadge) {
+      stageBadge.className = "state-badge state-coral";
+      stageBadge.textContent = "Source unavailable";
+    }
+  }
+
   function renderBenchmark(next) {
     const benchmark = fulfillmentBenchmark(next);
     const sourceLabel = erpEvidenceSourceLabel(next?.evidence_mode);
+    const retained = isRetainedEvidence(next?.evidence_mode);
     const grid = $("ops-benchmark-grid");
     const badge = $("ops-benchmark-state");
     if (!grid || !badge) return;
@@ -943,7 +1278,7 @@
       setText("ops-benchmark-note", `${sourceAwareErpText(benchmark.reason, next?.evidence_mode)} Historical, industry, and savings baselines are unavailable.`);
       grid.replaceChildren(emptyList("No comparable current-case benchmark is available.")); return;
     }
-    badge.className = "state-badge state-cyan"; badge.textContent = "Current case only";
+    badge.className = "state-badge state-cyan"; badge.textContent = retained ? "Retained case only" : "Current case only";
     const card = (label, actual, descriptor) => {
       const node = document.createElement("article"); node.className = "ops-benchmark-card";
       const title = document.createElement("span"); title.textContent = label;
@@ -955,7 +1290,7 @@
     grid.replaceChildren(
       card("Customer commitment", benchmark.target, `${benchmark.order_count} current order${benchmark.order_count === 1 ? "" : "s"}`),
       card("Native dispatch", benchmark.dispatched, "Recorded dispatch"),
-      card("Recorded delivery confirmation", benchmark.confirmed, benchmark.synthetic ? "Synthetic recorded event; not independently verified receipt" : "Recorded event"),
+      card(benchmark.synthetic ? "Carrier confirmation declared" : "Delivery confirmation recorded", benchmark.confirmed, benchmark.synthetic ? "Declared synthetic carrier confirmation; not independently verified receipt" : "Recorded event"),
     );
     setText("ops-benchmark-note", `Source: ${sourceLabel} · Sample: one configured operation · Historical, industry, and savings baselines are unavailable.`);
   }
@@ -1087,30 +1422,38 @@
     const activeAlerts = next.alerts.filter((alert) => !isResolvedAlert(alert));
     const incidentAlerts = next.alerts.filter(isRecord);
     const handoffGroups = groupHandoffs(next.handoffs);
-    const groupFor = (needle) => handoffGroups.find((group) => group.provider.toLowerCase().includes(needle));
-    const statusFor = (needle) => {
-      const group = groupFor(needle);
-      return group?.latest?.status ? pretty(group.latest.status) : "No readback";
-    };
-    const sources = [
-      { key: "erp", icon: "ph-buildings", label: "ERPNext", detail: `${next.documents.length} record${next.documents.length === 1 ? "" : "s"}`, target: "ops-documents-panel", alert: Boolean(incidentAlerts.length && next.documents.length) },
-      { key: "airtable", icon: "ph-table", label: "Airtable", detail: statusFor("airtable"), target: "ops-handoffs-panel" },
-      { key: "jira", icon: "ph-kanban", label: "Jira", detail: statusFor("jira"), target: "ops-handoffs-panel", alert: Boolean(incidentAlerts.length && groupFor("jira")) },
-      { key: "celigo", icon: "ph-arrows-left-right", label: "Celigo", detail: statusFor("celigo"), target: "ops-handoffs-panel" },
-      { key: "slack", icon: "ph-chat-circle-text", label: "Slack", detail: statusFor("slack"), target: "ops-handoffs-panel" },
-    ];
+    const sources = [];
+    if (next._provided.documents) {
+      sources.push({
+        key: "erp",
+        icon: "ph-buildings",
+        label: "ERP evidence",
+        detail: `${next.documents.length} linked record${next.documents.length === 1 ? "" : "s"}`,
+        target: "ops-documents-panel",
+        alert: Boolean(incidentAlerts.length && next.documents.length),
+      });
+    }
+    handoffGroups.forEach((group, index) => {
+      sources.push({
+        key: `handoff-${index}`,
+        icon: "ph-arrows-left-right",
+        label: group.provider,
+        detail: pretty(group.latest.status || "No readback"),
+        target: "ops-handoffs-panel",
+        alert: Boolean(incidentAlerts.length && /ERROR|PENDING|UNKNOWN/i.test(group.latest.status)),
+      });
+    });
     const network = document.createElement("div"); network.className = "ops-network";
     const sourceColumn = document.createElement("div"); sourceColumn.className = "ops-network-column";
-    const sourceKicker = document.createElement("span"); sourceKicker.className = "ops-network-kicker"; sourceKicker.textContent = "Source systems";
+    const sourceKicker = document.createElement("span"); sourceKicker.className = "ops-network-kicker"; sourceKicker.textContent = "Same-case source records";
     const sourceStack = document.createElement("div"); sourceStack.className = "ops-network-source-stack";
-    sources.forEach((source) => sourceStack.append(networkNode({ ...source, className: "ops-network-source" })));
+    if (sources.length) sources.forEach((source) => sourceStack.append(networkNode({ ...source, className: "ops-network-source" })));
+    else sourceStack.append(emptyList("No same-case source record is available."));
     sourceColumn.append(sourceKicker, sourceStack);
 
     const agentColumn = document.createElement("div"); agentColumn.className = "ops-network-column ops-network-agent-wrap";
     const agentKicker = document.createElement("span"); agentKicker.className = "ops-network-kicker"; agentKicker.textContent = "Reasoning layer";
-    const agentProvider = firstProvider(next, ["conversation_provider", "provider", "model"])
-      || firstProvider(next.conversation, ["provider_label", "provider", "model"])
-      || "Native bridge —";
+    const agentProvider = agentProviderDisplay(next);
     const agent = networkNode({ key: "agent", icon: "ph-sparkle", label: "Agent board", detail: agentProvider, target: "ops-chat-panel", className: "ops-network-agent" });
     agentColumn.append(agentKicker, agent);
     if (incidentAlerts.length) {
@@ -1139,32 +1482,30 @@
     const list = $("ops-signal-source-list");
     if (!list) return;
     const groups = groupHandoffs(next.handoffs);
-    const groupFor = (needle) => groups.find((group) => group.provider.toLowerCase().includes(needle));
     const documentRecord = next.documents.find((record) => isRecord(record)) || null;
-    const entries = [
-      {
-        label: "ERPNext",
-        detail: documentRecord ? firstText(documentRecord, ["name", "record_id", "id"]) || "PO20 document" : "No linked document",
-        status: documentRecord ? "VERIFIED" : "NO READBACK",
-      },
-      ...[["Airtable", "airtable"], ["Jira", "jira"], ["Celigo", "celigo"], ["Slack", "slack"]].map(([label, needle]) => {
-        const group = groupFor(needle);
-        return {
-          label,
-          detail: group?.latest?.record_id || group?.latest?.status ? group.latest.record_id || "Readback recorded" : "No readback",
-          status: group?.latest?.status ? pretty(group.latest.status) : "NO READBACK",
-        };
-      }),
-    ];
-    const linked = entries.filter((entry) => entry.status !== "NO READBACK").length;
-    setText("ops-signal-source-count", `${linked} linked · ${entries.length} systems`);
+    const entries = [];
+    if (next._provided.documents) {
+      entries.push({
+        label: "ERP evidence",
+        detail: documentRecord ? firstText(documentRecord, ["name", "record_id", "id"]) || "Linked document" : "No linked document",
+        status: documentRecord ? "RECORDED" : "NO RECORD",
+      });
+    }
+    groups.forEach((group) => entries.push({
+      label: group.provider,
+      detail: group.latest.record_id || "Readback recorded",
+      status: pretty(group.latest.status || "No readback"),
+    }));
+    const linked = entries.filter((entry) => !/^NO (READBACK|RECORD)$/.test(entry.status)).length;
+    setText("ops-signal-source-count", entries.length ? `${linked} recorded · ${entries.length} source${entries.length === 1 ? "" : "s"}` : "No source records");
+    if (!entries.length) { list.replaceChildren(emptyList("No same-case source record is available.")); return; }
     list.replaceChildren(...entries.map((entry) => {
       const row = document.createElement("div"); row.className = "ops-signal-source";
       const identity = document.createElement("div");
       const title = document.createElement("strong"); title.textContent = entry.label;
       const detail = document.createElement("small"); detail.textContent = entry.detail;
       identity.append(title, detail);
-      const status = document.createElement("span"); status.className = `ops-signal-source-status${entry.status === "NO READBACK" ? " is-muted" : ""}`; status.textContent = entry.status;
+      const status = document.createElement("span"); status.className = `ops-signal-source-status${/NO (READBACK|RECORD)/.test(entry.status) ? " is-muted" : ""}`; status.textContent = entry.status;
       row.append(identity, status);
       return row;
     }));
@@ -1177,10 +1518,10 @@
     const recordsAvailable = next.documents.length > 0;
     const collaborationAvailable = groups.length > 0;
     const tools = [
-      ["read_control_context", next.available ? "READ" : "UNAVAILABLE"],
-      ["read_erp_evidence", recordsAvailable ? "READ" : "MISSING"],
-      ["read_collaboration_evidence", collaborationAvailable ? "READ" : "NOT NEEDED"],
-      ["manager_gate", isRetainedEvidence(next.evidence_mode) ? "CONFIRM" : "REVIEW"],
+      ["read_control_context", next.available ? "AVAILABLE" : "UNAVAILABLE"],
+      ["read_erp_evidence", recordsAvailable ? "AVAILABLE" : "NO RECORDS"],
+      ["read_collaboration_evidence", collaborationAvailable ? "AVAILABLE" : "NO RECORDS"],
+      ["manager_gate", isRetainedEvidence(next.evidence_mode) ? "CONFIRMATION" : "APPROVAL"],
     ];
     list.replaceChildren(...tools.map(([label, status]) => {
       const row = document.createElement("div"); row.className = "ops-agent-tool";
@@ -1240,11 +1581,12 @@
     if (allocation.native_reservation === true || /RESERV/i.test(source)) return "Native reservation";
     return "Allocation record";
   }
-  function deliverySummary(delivery, requested) {
-    if (!finite(delivery)) return "Delivery confirmed unknown";
+  function deliverySummary(delivery, requested, synthetic = false) {
+    if (!finite(delivery)) return synthetic ? "Carrier confirmation declared unknown" : "Delivery confirmed unknown";
+    const label = synthetic ? "Carrier confirmation declared" : "Delivery confirmed";
     return finite(requested)
-      ? `Delivery confirmed ${displayQuantity(delivery)} / ${displayQuantity(requested)}`
-      : `Delivery confirmed ${displayQuantity(delivery)}`;
+      ? `${label} ${displayQuantity(delivery)} / ${displayQuantity(requested)}`
+      : `${label} ${displayQuantity(delivery)}`;
   }
   function contractFlag(value, affirmative, negative) {
     return value === true ? affirmative : value === false ? negative : "Unknown";
@@ -1383,7 +1725,7 @@
       const outbound = [
         finite(picked) ? `Picked ${displayQuantity(picked)}` : pickedEvidenceRecorded(next, order) ? "Picked recorded" : "Picked unknown",
         finite(dispatched) ? `Dispatched ${displayQuantity(dispatched)}` : "Dispatched unknown",
-        deliverySummary(delivery, requested),
+        deliverySummary(delivery, requested, next.synthetic_input === true),
       ].join(" · ");
       row.append(first, metricBlock(allocationPending ? "Proposed" : "Allocated", displayQuantity(allocated), allocated > 0 ? "is-positive" : ""), metricBlock("Backorder", displayQuantity(backorder), backorder > 0 ? "is-alert" : ""), metricBlock("Outbound evidence", outbound));
       return row;
@@ -1582,16 +1924,21 @@
     const heading = document.createElement("div"); heading.className = "ops-financial-group-heading";
     const titleNode = document.createElement("strong"); titleNode.textContent = title;
     const badge = document.createElement("span");
-    badge.className = `state-badge state-${group.status === "CURRENT" ? "lime" : group.status === "MISSING" ? "amber" : "coral"}`;
-    badge.textContent = pretty(group.status);
+    const retained = isRetainedEvidence(evidenceMode);
+    badge.className = `state-badge state-${group.status === "CURRENT" ? retained ? "cyan" : "lime" : group.status === "MISSING" ? "amber" : "coral"}`;
+    badge.textContent = retained && group.status === "CURRENT" ? "Retained snapshot" : pretty(group.status);
     heading.append(titleNode, badge);
     const note = document.createElement("p"); note.className = "ops-financial-note";
     const sourceLabel = erpEvidenceSourceLabel(evidenceMode);
     const sourceSentence = `${sourceLabel[0].toUpperCase()}${sourceLabel.slice(1)}`;
     note.textContent = group.status === "CURRENT" && group.records.length
-      ? `Invoice records read from the ${sourceLabel}.`
+      ? retained
+        ? `Invoice records are retained accepted ERP evidence. CURRENT means records were available in the recorded snapshot, not a fresh source read.`
+        : `Invoice records read from the ${sourceLabel}.`
       : group.status === "CURRENT"
-        ? `${sourceSentence} returned no invoice records.`
+        ? retained
+          ? `The retained accepted ERP snapshot returned no invoice records.`
+          : `${sourceSentence} returned no invoice records.`
         : financialStatusMessage(group.status, title.startsWith("Sales") ? "Sales" : "Purchase", evidenceMode);
     section.append(heading, note);
     if (group.status === "CURRENT" && group.records.length) {
@@ -1611,14 +1958,17 @@
     }
     const financials = normalizeFinancials(next.financials);
     const sourceLabel = erpEvidenceSourceLabel(next?.evidence_mode);
+    const retained = isRetainedEvidence(next.evidence_mode);
     panel.hidden = false;
     const status = $("ops-financials-status");
     if (status) {
-      status.className = `state-badge state-${financials.status === "CURRENT" ? "lime" : "coral"}`;
-      status.textContent = pretty(financials.status);
+      status.className = `state-badge state-${financials.status === "CURRENT" ? retained ? "cyan" : "lime" : "coral"}`;
+      status.textContent = retained && financials.status === "CURRENT" ? "Retained snapshot" : pretty(financials.status);
     }
     setText("ops-financials-note", financials.status === "CURRENT"
-      ? `Commercial records are read from the ${sourceLabel}. Sales order line amounts are order values; they are not revenue. Invoice totals and outstanding amounts are invoice-level amounts.`
+      ? retained
+        ? "Commercial records are retained accepted ERP evidence. CURRENT means records were available in the recorded snapshot, not a fresh source read. Sales order line amounts are order values; they are not revenue. Invoice totals and outstanding amounts are invoice-level amounts."
+        : `Commercial records are read from the ${sourceLabel}. Sales order line amounts are order values; they are not revenue. Invoice totals and outstanding amounts are invoice-level amounts.`
       : `Commercial evidence is unavailable from the ${sourceLabel}. No amounts are inferred.`);
     const orders = $("ops-financial-orders");
     const invoices = $("ops-financial-invoices");
@@ -1662,18 +2012,24 @@
     if (type === "delivery") return `${firstText(event, ["shipment_id", "shipment"]) || "Shipment unknown"} · explicit delivery evidence`;
     return firstText(event, ["message", "evidence_ref"]) || "Event details unavailable";
   }
+
+  function recentActivityEvents(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map((event, index) => ({ event, index })).sort((left, right) => {
+      const leftTime = Date.parse(left.event?.occurred_at || "");
+      const rightTime = Date.parse(right.event?.occurred_at || "");
+      if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return rightTime - leftTime;
+      if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) return Number.isFinite(leftTime) ? -1 : 1;
+      return right.index - left.index;
+    });
+  }
+
   function renderEvents(next) {
     const list = $("ops-events-list");
     setText("ops-events-count", next._provided.events ? `${next.events.length} event${next.events.length === 1 ? "" : "s"}` : "Unknown");
     if (!next._provided.events) { list.replaceChildren(emptyList("Source activity is unavailable from the current projection.")); return; }
     if (!next.events.length) { list.replaceChildren(emptyList("No source events recorded yet.")); return; }
-    const events = next.events.map((event, index) => ({ event, index })).sort((a, b) => {
-      const aSequence = numberFrom(a.event?.sequence); const bSequence = numberFrom(b.event?.sequence);
-      if (finite(aSequence) && finite(bSequence)) return aSequence - bSequence;
-      const aTime = Date.parse(a.event?.occurred_at || ""); const bTime = Date.parse(b.event?.occurred_at || "");
-      if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return aTime - bTime;
-      return a.index - b.index;
-    });
+    const events = recentActivityEvents(next.events);
     list.replaceChildren(...events.map(({ event }) => {
       const item = document.createElement("li"); item.className = "ops-activity-item";
       const time = document.createElement("time"); time.className = "ops-activity-time"; time.textContent = formatDate(event.occurred_at);
@@ -1764,12 +2120,86 @@
     }
     return { projection: merged, memory: prior };
   }
+
+  function appendInlineMarkdown(parent, value) {
+    const parts = String(value ?? "").split(/(\*\*[^*\n]+\*\*)/g);
+    for (const part of parts) {
+      if (!part) continue;
+      if (/^\*\*[^*\n]+\*\*$/.test(part)) {
+        const strong = document.createElement("strong");
+        strong.textContent = part.slice(2, -2);
+        parent.append(strong);
+      } else {
+        parent.append(document.createTextNode(part));
+      }
+    }
+  }
+
+  function renderMarkdownAnswer(answerNode, answer) {
+    const content = document.createElement("div");
+    content.className = "ops-markdown";
+    const blocks = markdownBlocks(answer);
+    for (const block of blocks) {
+      if (block.type === "heading") {
+        const heading = document.createElement(`h${Math.min(5, block.level + 2)}`);
+        appendInlineMarkdown(heading, block.text);
+        content.append(heading);
+      } else if (block.type === "list") {
+        const list = document.createElement("ul");
+        for (const item of block.items) {
+          const listItem = document.createElement("li");
+          appendInlineMarkdown(listItem, item);
+          list.append(listItem);
+        }
+        content.append(list);
+      } else if (block.type === "table") {
+        const wrapper = document.createElement("div");
+        wrapper.className = "ops-markdown-table-wrap";
+        const table = document.createElement("table");
+        table.setAttribute("aria-label", "Agent answer table");
+        const head = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        for (const label of block.headers) {
+          const cell = document.createElement("th");
+          cell.scope = "col";
+          appendInlineMarkdown(cell, label);
+          headerRow.append(cell);
+        }
+        head.append(headerRow);
+        table.append(head);
+        if (block.rows.length) {
+          const body = document.createElement("tbody");
+          for (const row of block.rows) {
+            const tableRow = document.createElement("tr");
+            for (const value of row) {
+              const cell = document.createElement("td");
+              appendInlineMarkdown(cell, value);
+              tableRow.append(cell);
+            }
+            body.append(tableRow);
+          }
+          table.append(body);
+        }
+        wrapper.append(table);
+        content.append(wrapper);
+      } else {
+        const paragraph = document.createElement("p");
+        appendInlineMarkdown(paragraph, block.text);
+        content.append(paragraph);
+      }
+    }
+    if (!content.childNodes.length) {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = String(answer ?? "");
+      content.append(paragraph);
+    }
+    answerNode.replaceChildren(content);
+  }
+
   function renderConversation(next) {
     const conversation = next.conversation || {};
     const status = (firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
-    const provider = firstProvider(conversation, ["provider_label", "provider", "model"])
-      || firstProvider(next, ["conversation_provider", "provider", "model"])
-      || (/UNAVAILABLE|ERROR|FAILED|DISABLED/.test(status) ? "Unavailable" : "Native bridge —");
+    const provider = agentProviderDisplay(next);
     const sourceLabel = erpEvidenceSourceLabel(next?.evidence_mode);
     const context = firstText(conversation, ["context_label", "context", "source_summary"]) || firstText(next, ["conversation_context"]) || sourceLabel;
     setText("ops-chat-provider", provider);
@@ -1782,7 +2212,7 @@
       const paragraph = document.createElement("p"); paragraph.textContent = message; answerNode.replaceChildren(paragraph); return;
     }
     const answer = conversationAnswer(conversation);
-    if (answer) { voiceController?.setAnswer(answer); answerNode.replaceChildren(Object.assign(document.createElement("p"), { textContent: answer })); return; }
+    if (answer) { voiceController?.setAnswer(answer); renderMarkdownAnswer(answerNode, answer); return; }
     voiceController?.setAnswer("");
     const paragraph = document.createElement("p"); paragraph.className = "ops-empty"; paragraph.textContent = "Ask a read-only question about quantities, lots, customers, or delivery evidence."; answerNode.replaceChildren(paragraph);
   }
@@ -1954,7 +2384,14 @@
     if (!list) return;
     const photos = photoAttachmentList(next);
     setText("ops-photos-count", photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"}` : "No photos");
-    if (!photos.length) { list.replaceChildren(emptyList("No same-case photos have been attached.")); return; }
+    if (!photos.length) {
+      const absence = document.createElement("div"); absence.className = "ops-evidence-absence";
+      const icon = document.createElement("i"); icon.className = "ph ph-image-square"; icon.setAttribute("aria-hidden", "true");
+      const copy = document.createElement("div");
+      const title = document.createElement("strong"); title.textContent = "No attached receiving evidence";
+      const detail = document.createElement("span"); detail.textContent = "No same-case source-backed photo is available. Image claims are not inferred.";
+      copy.append(title, detail); absence.append(icon, copy); list.replaceChildren(absence); return;
+    }
     list.replaceChildren(...photos.map((photo) => {
       const card = document.createElement("article"); card.className = "ops-photo-card";
       const preview = document.createElement("button"); preview.type = "button"; preview.className = "ops-photo-open";
@@ -1968,8 +2405,8 @@
         preview.setAttribute("aria-label", expanded ? "Collapse attached photo" : "Expand attached photo");
       });
       const copy = document.createElement("div");
-      const title = document.createElement("strong"); title.textContent = text(photo.event_id) ? `Associated with ${text(photo.event_id)}` : text(photo.proposal_id) ? "Prepared for manager approval" : "Unassociated operator attachment";
-      const detail = document.createElement("small"); detail.textContent = `Manual photo · ${text(photo.interpretation) === "NOT_ANALYZED" ? "not analyzed" : "status unavailable"} · ${formatDate(photo.recorded_at)}`;
+      const title = document.createElement("strong"); title.textContent = "Attached receiving evidence";
+      const detail = document.createElement("small"); detail.textContent = `Manual photo · ${text(photo.interpretation) === "NOT_ANALYZED" ? "not analyzed" : "status unavailable"} · attachment record ${formatDate(photo.recorded_at)}`;
       copy.append(title, detail); card.append(preview, copy); return card;
     }));
   }
@@ -2151,18 +2588,21 @@
     projection = next;
     if (next.available) {
       lastProjectionAt = new Date().toISOString();
-      renderRefreshState();
     }
+    renderRefreshState();
     document.body.dataset.operationsState = next.available ? "ready" : "disabled";
     setText("ops-case-label", next.case_label || (next.available ? "Current operation" : "No configured operation"));
     setText("ops-case-id", next.case_id || "Case identifier unavailable");
-    const purchaseOrder = next.documents.find((record) => /^purchase order$/i.test(firstText(record, ["kind", "doctype", "type"])));
+    const purchaseOrder = purchaseOrderRecord(next);
     setText("ops-case-po", purchaseOrder ? `PO ${firstText(purchaseOrder, ["name", "record_id", "id"]) || "identifier unavailable"}` : "Purchase order unavailable");
     const stageLabel = deliveryCompletionLabel(next) || pretty(next.stage);
     setText("ops-stage-badge", stageLabel);
     const stageBadge = $("ops-stage-badge"); stageBadge.className = `state-badge state-${statusTone(stageLabel)}`; stageBadge.textContent = stageLabel;
     setText("ops-flow-message", firstText(next, ["message", "summary"]) || "Current quantities and evidence from the source projection.");
     setText("ops-synthetic-badge", next.synthetic_input === true ? "Declared synthetic inputs" : "Native source events");
+    renderHero(next);
+    renderOrderValue(next);
+    renderEvidenceDrawer(next);
     const sourceStateKind = projectionSourceState(next);
     if (!next.available) {
       voiceController?.setAnswer("");
@@ -2338,6 +2778,16 @@
     }
   });
   $("ops-retry").addEventListener("click", () => { void refresh(); });
+  $("ops-open-evidence-drawer")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
+  $("ops-evidence-drawer-close")?.addEventListener("click", closeEvidenceDrawer);
+  $("ops-evidence-drawer-backdrop")?.addEventListener("click", closeEvidenceDrawer);
+  $("ops-evidence-drawer-open-operations")?.addEventListener("click", openFullOperationsEvidence);
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("ops-evidence-drawer")?.hidden) {
+      event.preventDefault();
+      closeEvidenceDrawer();
+    }
+  });
   document.querySelectorAll("[data-ops-view-link]").forEach((link) => {
     link.addEventListener("click", (event) => {
       event.preventDefault();

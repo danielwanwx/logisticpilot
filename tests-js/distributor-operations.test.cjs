@@ -43,6 +43,14 @@ const {
   isRetainedEvidence,
   statusTone,
   deliveryCompletionLabel,
+  evidenceStatusLabel,
+  agentProviderDisplay,
+  carrierConfirmationLabel,
+  sameCurrencyLineTotal,
+  orderValueDetails,
+  allocationDigest,
+  recentActivityEvents,
+  markdownBlocks,
   normalizeFinancials,
   financialStatusMessage,
   financialOrderSummary,
@@ -118,11 +126,11 @@ test('configured source failure stays distinct from a disabled operation', () =>
 test('retained evidence is labeled with its as-of time and does not claim a live source refresh', () => {
   const label = retainedEvidenceLabel({ status: 'RETAINED_AS_OF', as_of: '2026-09-11T05:52:37.405823Z' });
   assert.match(label, /^Retained accepted evidence · as of .+ · read-only Agent available when configured$/);
-  assert.equal(conversationInferenceCapability({ conversation: { inference_capability: 'AVAILABLE' } }), 'live inference available');
+  assert.equal(conversationInferenceCapability({ conversation: { inference_capability: 'AVAILABLE' } }), 'Agent inference capability available');
   assert.match(retainedEvidenceLabel(
     { status: 'RETAINED_AS_OF', as_of: '2026-09-11T05:52:37.405823Z' },
     { conversation: { inference_capability: 'AVAILABLE' } },
-  ), /live inference available$/);
+  ), /Agent inference capability available$/);
   assert.equal(retainedEvidenceLabel({ status: 'CURRENT', as_of: '2026-09-11T05:52:37.405823Z' }), '');
   assert.equal(isRetainedEvidence({ status: 'RETAINED_AS_OF' }), true);
   assert.equal(isRetainedEvidence({ status: 'CURRENT' }), false);
@@ -134,10 +142,34 @@ test('retained evidence is labeled with its as-of time and does not claim a live
   assert.equal(sourceAwareErpText('Current ERP source returned the case.', { status: 'RETAINED_AS_OF' }), 'retained accepted ERP evidence returned the case.');
   assert.equal(sourceAwareErpText('Current ERP source returned the case.', { status: 'UNAVAILABLE' }), 'ERP source unavailable returned the case.');
   const html = fs.readFileSync(path.join(__dirname, '../workspace/distributor-operations.html'), 'utf8');
-  assert.match(html, /ops-ask-link[\s\S]*?<span>Agent board<\/span>/);
-  assert.match(html, /<span class="object-label">Agent<\/span><h2 id="ops-chat-title">Agent board<\/h2>/);
-  assert.match(html, /distributor-operations\.js\?v=20260911-video-v2/);
+  assert.match(html, /ops-ask-link[\s\S]*?<span>Investigation<\/span>/);
+  assert.match(html, /<span class="object-label">Investigation<\/span><h2 id="ops-chat-title">Ask the agent<\/h2>/);
+  assert.match(html, /distributor-operations\.js\?v=20260912-reference-adaptation-v1/);
+  assert.match(html, /id="ops-evidence-retention"/);
   assert.match(html, /data-ops-view-link="dashboard"/);
+});
+
+test('top evidence status and agent provider stay factual before and after an Ask', () => {
+  const retained = { available: true, evidence_mode: { status: 'RETAINED_AS_OF', as_of: '2026-09-11T05:51:50.322138Z' } };
+  assert.match(evidenceStatusLabel(retained), /^RETAINED EVIDENCE · as of /);
+  assert.equal(evidenceStatusLabel({ available: true, evidence_mode: { status: 'CURRENT' } }), 'CURRENT ERP PROJECTION');
+  assert.equal(evidenceStatusLabel({ available: false, case_id: 'CASE-1', stage: 'SOURCE_UNAVAILABLE', evidence_mode: { status: 'UNAVAILABLE' } }), 'SOURCE UNAVAILABLE');
+  assert.equal(agentProviderDisplay({ conversation: {} }), 'Ask agent');
+  assert.equal(agentProviderDisplay({ conversation: { provider: { provider: 'bedrock', model: 'model-x' } } }), 'bedrock · model-x');
+  assert.equal(agentProviderDisplay({ conversation: { status: 'UNAVAILABLE' } }), 'Unavailable');
+});
+
+test('carrier declarations stay distinct from dispatch and delivery confirmation', () => {
+  const synthetic = {
+    available: true,
+    synthetic_input: true,
+    quantities: { ordered: 40, received: 40, dispatched: 40, delivery_confirmed: 40, held: 0, missing: 0, usable: 0, allocated: 0 },
+    alerts: [],
+  };
+  assert.equal(carrierConfirmationLabel(synthetic), 'Carrier confirmation declared 40 / 40');
+  assert.equal(deliverySummary(40, 40, true), 'Carrier confirmation declared 40 / 40');
+  assert.equal(deliveryCompletionLabel(synthetic), 'Carrier confirmation declared · 0 alerts to review');
+  assert.equal(carrierConfirmationLabel({ quantities: { ordered: 40, delivery_confirmed: 40 } }), 'Delivery confirmation recorded 40 / 40');
 });
 
 test('external handoffs group by provider and retain a verified evidence link', () => {
@@ -516,6 +548,11 @@ test('contract values remain literal text for safe DOM rendering', () => {
   const source = fs.readFileSync(path.join(__dirname, '../workspace/distributor-operations.js'), 'utf8');
   assert.match(source, /order\.textContent = row\.customer_order/);
   assert.doesNotMatch(source, /order\.innerHTML/);
+  assert.match(source, /renderMarkdownAnswer\(answerNode, answer\)/);
+  const markdownRenderer = source.slice(source.indexOf('function appendInlineMarkdown'), source.indexOf('function renderConversation'));
+  assert.match(markdownRenderer, /document\.createTextNode/);
+  assert.match(markdownRenderer, /\.textContent/);
+  assert.doesNotMatch(markdownRenderer, /\.innerHTML/);
 });
 
 test('projection preserves native conversation turns and unavailable status metadata', () => {
@@ -698,6 +735,53 @@ test('commercial projection preserves order line values and invoice-level amount
   assert.match(invoiceRecordSummary(financials.sales_invoices[0].records[0]), /Invoice-level outstanding amount USD 150/);
 });
 
+test('order value uses a supplied purchase-order line only and keeps zero distinct from unknown', () => {
+  const financials = {
+    status: 'CURRENT',
+    purchase_order: { currency: 'USD', line: { net_amount: 160 } },
+  };
+  const current = orderValueDetails({ available: true, evidence_mode: { status: 'CURRENT' }, financials });
+  assert.equal(current.value, 'USD 160');
+  assert.equal(current.label, 'Purchase order line amount');
+  assert.match(current.note, /not revenue, invoice, or payment/);
+  const retained = orderValueDetails({
+    available: true,
+    evidence_mode: { status: 'RETAINED_AS_OF', as_of: '2026-09-11T05:51:50.322138Z' },
+    financials,
+  });
+  assert.equal(retained.value, 'USD 160');
+  assert.equal(retained.label, 'Retained purchase order line amount');
+  assert.match(retained.note, /recorded snapshot, not a fresh source read/);
+  assert.equal(orderValueDetails({ available: true, financials: { status: 'CURRENT', purchase_order: { currency: 'USD', line: { net_amount: 0 } } } }).value, 'USD 0');
+  assert.equal(orderValueDetails({ available: false, financials }).value, 'Unavailable');
+  assert.equal(orderValueDetails({ available: true, financials: { status: 'CURRENT', purchase_order: { currency: 'USD', line: {} } } }).value, 'Unavailable');
+});
+
+test('line totals aggregate only when every supplied line shares a currency', () => {
+  assert.deepEqual(sameCurrencyLineTotal([
+    { currency: 'USD', line: { net_amount: 150 } },
+    { currency: 'USD', line: { net_amount: 90 } },
+  ]), { amount: 240, currency: 'USD' });
+  assert.equal(sameCurrencyLineTotal([
+    { currency: 'USD', line: { net_amount: 150 } },
+    { currency: 'EUR', line: { net_amount: 90 } },
+  ]), null);
+  assert.equal(sameCurrencyLineTotal([{ currency: 'USD', line: {} }]), null);
+  assert.equal(allocationDigest({ allocations: [
+    { customer_order: 'A', allocated: 25 }, { customer_order: 'B', allocated: 15 },
+  ] }), 'A 25 · B 15');
+});
+
+test('recent activity is a descending copy and leaves source event order unchanged', () => {
+  const events = [
+    { event_id: 'older', occurred_at: '2026-09-10T10:00:00Z' },
+    { event_id: 'newer', occurred_at: '2026-09-10T11:00:00Z' },
+    { event_id: 'undated' },
+  ];
+  assert.deepEqual(recentActivityEvents(events).map(({ event }) => event.event_id), ['newer', 'older', 'undated']);
+  assert.deepEqual(events.map((event) => event.event_id), ['older', 'newer', 'undated']);
+});
+
 test('missing and unavailable invoice states stay distinct and never say unpaid', () => {
   const missing = financialStatusMessage('MISSING', 'Purchase');
   const unavailable = financialStatusMessage('UNAVAILABLE', 'Sales');
@@ -714,11 +798,25 @@ test('answers hide paired reasoning blocks and alerts retain an actionable tone'
   assert.match(recommendedAction('INNER_QUANTITY_MISMATCH'), /inner count/i);
 });
 
+test('plain markdown answer blocks retain malformed input as text and never parse HTML', () => {
+  assert.deepEqual(markdownBlocks('# Case update\n\nKnown **fact**\n\n- First\n- Second\n\n| Order | Dispatch |\n| --- | --- |\n| A | 25 |\n| B | 15 |'), [
+    { type: 'heading', level: 1, text: 'Case update' },
+    { type: 'paragraph', text: 'Known **fact**' },
+    { type: 'list', items: ['First', 'Second'] },
+    { type: 'table', headers: ['Order', 'Dispatch'], rows: [['A', '25'], ['B', '15']] },
+  ]);
+  assert.deepEqual(markdownBlocks('| broken |\nnot a divider'), [
+    { type: 'paragraph', text: '| broken | not a divider' },
+  ]);
+  assert.deepEqual(markdownBlocks('<img src=x onerror=alert(1)>'), [
+    { type: 'paragraph', text: '<img src=x onerror=alert(1)>' },
+  ]);
+});
+
 test('page exposes the guarded business loop and synthetic evidence label', () => {
   const html = fs.readFileSync(path.join(__dirname, '../workspace/distributor-operations.html'), 'utf8');
   assert.match(html, /Process evidence/);
   assert.match(html, /Simulated scanner \/ inspection \/ carrier evidence/);
-  assert.match(html, /Delivery confirmed/);
   assert.match(html, /Ask about this operation/);
   assert.match(html, /Cross-system readback/);
   assert.match(html, /Commercial evidence/);
@@ -737,9 +835,19 @@ test('page exposes the guarded business loop and synthetic evidence label', () =
   assert.match(html, /href="#ops-chat-panel"/);
   assert.match(html, /distributor-operations\.js/);
   assert.match(html, /ops-quantity-allocated-label/);
+  assert.match(html, /ops-quantity-delivery-confirmed-label/);
+  assert.match(html, /ops-order-value-card/);
+  assert.match(html, /Remaining allocated stock/);
+  assert.match(html, /ops-evidence-drawer[\s\S]*role="dialog"/);
+  assert.match(html, /Capability names describe what the read-only workflow can use\. They are not an executed tool trace\./);
   const javascript = fs.readFileSync(path.join(__dirname, '../workspace/distributor-operations.js'), 'utf8');
+  assert.match(javascript, /Carrier confirmation declared/);
   assert.match(javascript, /reselect-pending-allocation/);
   assert.match(javascript, /prepare-proposal/);
   assert.match(javascript, /approve-proposal/);
   assert.match(javascript, /Review pending allocation/);
+  assert.match(javascript, /openEvidenceDrawer/);
+  assert.match(javascript, /event\.key === "Escape"/);
+  assert.match(javascript, /Agent inference capability available/);
+  assert.doesNotMatch(javascript, /Native bridge —/);
 });
