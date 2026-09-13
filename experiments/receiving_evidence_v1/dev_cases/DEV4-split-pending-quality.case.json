@@ -1,0 +1,47 @@
+{
+  "schema_version": "receiving-evidence-v1",
+  "tier": "development",
+  "case_id": "DEV4-split-pending-quality",
+  "snapshot_id": "dev4-split-pending-quality-s1",
+  "source_mode": "synthetic_snapshot",
+  "snapshot_as_of": "2026-09-12T16:00:00Z",
+  "question": "State the received quantity and the disposition for order SO-D2. Can the order be treated as eligible with the available receipt and quality evidence? Identify any missing prerequisite.",
+  "requested_quantity_names": ["RCV-D2:received_quantity"],
+  "requested_order_ids": ["SO-D2"],
+  "source_packets": [
+    {
+      "source": "receiving_quality",
+      "status": "available",
+      "as_of": "2026-09-12T15:58:00Z",
+      "records": [
+        {
+          "record_id": "RCV-D2",
+          "as_of": "2026-09-12T15:50:00Z",
+          "fields": {
+            "received_quantity": {"value": 6, "unit": "EA"},
+            "quality_state": "pending",
+            "lot_id": "LOT-D2"
+          }
+        }
+      ]
+    },
+    {
+      "source": "fulfillment_contract",
+      "status": "available",
+      "as_of": "2026-09-12T15:59:00Z",
+      "records": [
+        {
+          "record_id": "ORD-D2",
+          "as_of": "2026-09-12T15:59:00Z",
+          "fields": {
+            "order_id": "SO-D2",
+            "requested_quantity": {"value": 10, "unit": "EA"},
+            "eligibility_state": "pending_evidence",
+            "eligible_quantity": {"value": null, "unit": "EA"},
+            "missing_prerequisites": ["quality evidence remains pending"]
+          }
+        }
+      ]
+    }
+  ]
+}

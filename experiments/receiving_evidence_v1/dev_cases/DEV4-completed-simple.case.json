@@ -1,0 +1,45 @@
+{
+  "schema_version": "receiving-evidence-v1",
+  "tier": "development",
+  "case_id": "DEV4-completed-simple",
+  "snapshot_id": "dev4-completed-simple-s1",
+  "source_mode": "synthetic_snapshot",
+  "snapshot_as_of": "2026-09-12T16:00:00Z",
+  "question": "State the received quantity and the disposition for order SO-D1 from the available receiving, quality, contract, and acknowledgement evidence. If an eligible quantity cannot be established, identify the missing prerequisite.",
+  "requested_quantity_names": ["RCV-D1:received_quantity"],
+  "requested_order_ids": ["SO-D1"],
+  "source_packets": [
+    {
+      "source": "receiving_quality",
+      "status": "available",
+      "as_of": "2026-09-12T15:55:00Z",
+      "records": [
+        {
+          "record_id": "RCV-D1",
+          "as_of": "2026-09-12T15:54:00Z",
+          "fields": {
+            "received_quantity": {"value": 10, "unit": "EA"},
+            "quality_state": "released",
+            "lot_id": "LOT-D1"
+          }
+        }
+      ]
+    },
+    {
+      "source": "fulfillment_contract",
+      "status": "available",
+      "as_of": "2026-09-12T15:56:00Z",
+      "records": [
+        {
+          "record_id": "ORD-D1",
+          "as_of": "2026-09-12T15:56:00Z",
+          "fields": {
+            "order_id": "SO-D1",
+            "requested_quantity": {"value": 10, "unit": "EA"},
+            "acknowledgement_state": "confirmed"
+          }
+        }
+      ]
+    }
+  ]
+}
