@@ -1,6 +1,6 @@
-# Current distributor workspace
+# LogisticPilot current distributor workspace
 
-The current product entry is `/operations`. The older `make case-console` target exercises a separate historical path; it is not the PO20 distributor workspace.
+The current LogisticPilot product entry is `/operations`. The older `make case-console` target is a separate historical offline entry; it is not the PO20 distributor workspace.
 
 This connected entry needs existing private ERP demo credentials, the matching distributor case configuration, and its local runtime journal. A clean clone does not contain those private records. Synthetic unit tests are not a substitute for this connected run.
 

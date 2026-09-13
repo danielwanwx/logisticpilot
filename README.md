@@ -1,31 +1,23 @@
-# LogisticPilot — The Missing 20
+# LogisticPilot
 
-> **September 12 runtime restoration:** Real Nova Pro answers now work in the
-> isolated PO20 workspace, including the previously failing delivery/payment
-> follow-up. Source freshness and historical completion confirmation are corrected;
-> restored conversations keep four completed question/answer pairs instead of
-> accumulating old evidence payloads. Fresh ERP reads before and after inspection
-> agree: 40 received / 40 dispatched, A25/B15, with no business record change.
-> Opus 4.6 access was subsequently restored and verified in the real workspace;
-> see its [acceptance record](docs/audits/2026-09-12-opus-restoration.md). See the
-> [verified results and limits](docs/audits/2026-09-12-runtime-restoration.md),
-> [startup runbook](docs/runbooks/current-operations.md), and
-> [Opus access diagnosis](docs/runbooks/opus-access.md).
-
-> **September 11 status: the PO20 same-case business loop is complete; final video
-> production and Devpost upload are in progress.** The current case is
-> `M20-DIST-COMPONENT-V2-20260910` / `PUR-ORD-2026-00020`. See the [current
-> ledger](docs/submission/finalization-tracker.md) for the evidence boundary and
-> upload status.
+> **September 13 current status:** The retained PO20 review and real Claude Opus
+> 4.6 application answers are verified in the isolated workspace. Historical ERP
+> evidence records 40 received / 40 dispatched, allocated A25/B15. See the
+> [September 12 runtime restoration audit](docs/audits/2026-09-12-runtime-restoration.md)
+> and [Opus access/application audit](docs/audits/2026-09-12-opus-restoration.md).
 
 
 
-**Find the gap. Prove the cause. Close the loop.**
+**Investigate exceptions. Protect stock. Keep eligible orders moving.**
 
-The Missing 20 helps parts distributors turn one receiving exception into a
+LogisticPilot helps parts distributors turn one receiving exception into a
 reviewable fulfillment workflow. Operators record carton, quantity, lot, and
 inspection evidence; a Strands agent selects among explicit customer contracts,
-while deterministic code owns quantities, authority, ERP effects, and readback.
+while deterministic code owns quantities, authority, ERP effects, and readback.[^heritage]
+
+[^heritage]: LogisticPilot was formerly named The Missing 20. Historical audit paths,
+code package names, environment variables, case IDs, and runtime database names
+retain the former name for traceability.
 
 The current demonstration follows isolated case
 `M20-DIST-COMPONENT-V2-20260910` on `PUR-ORD-2026-00020`: 40 parts ordered,
@@ -77,7 +69,7 @@ it is not connected to the current PO20 receiving path.
 
 ## Architecture
 
-![The Missing 20 current 40-part architecture](docs/architecture/distributor-operations-recording.visual-check.1440x900.light.png)
+![LogisticPilot current 40-part architecture](docs/architecture/distributor-operations-recording.visual-check.1440x900.light.png)
 
 The current recording architecture follows synthetic demo inputs—operator, scanner,
 inspection, and carrier—through the Operations UI, the Python operation coordinator,
@@ -144,7 +136,13 @@ and 15/15 multi-turn cases (45 dialogue turns), including approve, reject, deny,
 needs-evidence outcomes. These are historical bounded demo-set results, not evidence
 of a production SLO.
 
-## Quick start — no cloud credentials required
+## Quick start — current `/operations` workspace
+
+The current LogisticPilot entry is `/operations`. It requires an existing private
+ERP demo case configuration, authorized Bedrock credentials, and the matching local
+runtime journal. A clean clone does not contain those private records, so follow the
+[current operations runbook](docs/runbooks/current-operations.md) for the exact
+startup command and read-only acceptance boundary.
 
 Prerequisites:
 
@@ -154,25 +152,26 @@ Prerequisites:
 - GNU `make` (macOS Command Line Tools or a standard Linux build environment)
 
 ```bash
-git clone https://github.com/danielwanwx/the-missing-20.git
-cd the-missing-20
-cp .env.example .env
-make bootstrap
-make case-console
+git clone https://github.com/danielwanwx/logisticpilot.git
+cd logisticpilot
 ```
 
-Open `http://127.0.0.1:8765`, choose **Live / Inject incident**, then inspect
-Dashboard → Investigation and the synthetic source records.
+After cloning, install the local dependencies with `make bootstrap`. Then configure
+the authorized private ERP/Bedrock integrations, matching case JSON, and runtime
+journal described in the runbook; those private records are not included in the
+clone. Start `scripts/decision_workspace_server.py` and open
+`http://127.0.0.1:8930/operations?view=dashboard`.
 
-Startup and source inspection require no cloud credentials. The current conversation
-and **Authorize diagnosis** actions require a real, authorized Bedrock connection;
-without one they stop safely and do not expose an approved execution plan. The default
-browser path is therefore not a complete offline Agent demonstration. `make judge-demo`
-checks the separately retained historical 20-unit proof without cloud calls; it does
-not execute the current receiving workflow. Keep the generated `.missing20-runtime`
-directory for persistence checks.
+The older `make case-console` target is a historical offline entry for the retained
+20-unit incident. It is separate from the current `/operations` receiving workflow
+and does not provide a clean-clone end-to-end demonstration. `make judge-demo` checks
+that historical path without cloud calls; it does not execute current receiving
+operations.
 
-### Real Strands / Nova mode
+### Historical `case-console` evidence
+
+The commands below exercise the historical `case-console` path, separate from the
+current `/operations` workspace.
 
 With an authorized AWS profile and purpose-built external demo records configured in
 `.env`:

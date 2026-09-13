@@ -1,13 +1,10 @@
-# System Overview
+# LogisticPilot — System Overview
 
-> **September 9 finalization status: NOT READY.** The 20-unit / USD 42,000
-> evidence below belongs to the historical September 7 scenario. The separate
-> R4 photo-receiving case (PO16/PR7) proves one Box posted and recovered after a
-> lost acknowledgement, with verified Airtable/Slack handoffs. It has no linked
-> invoice or customer fulfillment. R3 real multi-turn receiving remains FAILED;
-> the September 6 8/8 and 15/15 results do not cover that path.
-> See the [current finalization ledger](finalization-tracker.md) and
-> [R4 scope audit](../audits/2026-09-09-r4-automatic-receiving-recovery-review.md).
+> **September 13 current status:** The retained PO20 review and real Claude Opus
+> 4.6 application answers are verified in the isolated workspace. Historical ERP
+> evidence records 40 received / 40 dispatched, allocated A25/B15. See the
+> [September 12 runtime restoration audit](../audits/2026-09-12-runtime-restoration.md)
+> and [Opus access/application audit](../audits/2026-09-12-opus-restoration.md).
 
 
 ## Problem
@@ -21,7 +18,7 @@ wrong lot, or create unsupported delivery and invoice records.
 
 ## Product
 
-The Missing 20 is a reusable agentic incident-control platform for connected operations.
+LogisticPilot is a reusable agentic incident-control platform for connected operations.[^heritage]
 It combines a live control tower, a Strands investigation workspace, case-scoped human
 conversation, deterministic action eligibility, a Manager decision gate, bounded
 execution, authoritative reread, and regression-tested duplicate protection.
@@ -30,6 +27,10 @@ The Dashboard answers: What changed? How large is the operational and financial 
 Which systems disagree? The Investigation workspace answers: What did the agent read?
 Which hypotheses did it test? What evidence is missing? Why is a recovery safe or why
 must the system stop?
+
+[^heritage]: LogisticPilot was formerly named The Missing 20. Historical audit paths,
+code package names, environment variables, case IDs, and runtime database names
+retain the former name for traceability.
 
 ## Connected evidence
 
