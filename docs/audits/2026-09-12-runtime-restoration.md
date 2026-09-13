@@ -1,6 +1,6 @@
 # Runtime restoration verification
 
-September 12, 2026, Pacific. This continues the [return-to-project audit](2026-09-12-return-to-project-review.md). The runtime correction passed focused checks and real read-only application acceptance with explicitly selected Nova Pro. Opus access and the separate multi-agent comparison remain incomplete.
+September 12, 2026, Pacific. This continues the [return-to-project audit](2026-09-12-return-to-project-review.md). The runtime correction passed focused checks and real read-only application acceptance with explicitly selected Nova Pro. Opus was denied during this slice and was subsequently [restored and verified separately](2026-09-12-opus-restoration.md). The multi-agent comparison remains incomplete.
 
 | Check | Observed result | Boundary |
 |---|---|---|

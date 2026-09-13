@@ -10,7 +10,7 @@ Use the repository's existing `.venv` and local `.env`. The case JSON must refer
 
 The current AWS profile chain uses `missing20-sandbox` with the login source `missing20-login`. Follow the [AWS login runbook](aws-login.md) only if identity/session validation fails. `AccessDeniedException` after successful identity validation is a model permission problem, not evidence that logging in again will fix it.
 
-Nova Pro access was verified on September 12. Opus 4.6 still returned access denial because the sandbox role has no identity policy allowing its invocation; see the [scoped administrator recovery procedure](opus-access.md). Select the intended model explicitly; the application must not silently switch providers or invent a fallback answer.
+Nova Pro and Opus 4.6 access were verified on September 12, including real application answers. The current isolated workspace selects `opus46`; see the [access recovery evidence](opus-access.md). Select the intended model explicitly; the application must not silently switch providers or invent a fallback answer.
 
 ## Inspect retained evidence with real model answers
 
@@ -20,7 +20,7 @@ Set `M20_CASE_CONFIG` and `M20_RUNTIME` in your terminal to the existing private
 MISSING20_ENVIRONMENT=demo \
 MISSING20_AGENT_PROVIDER=bedrock \
 MISSING20_NATIVE_RECEIVING_DIALOGUE=1 \
-MISSING20_DISTRIBUTOR_MODEL=nova \
+MISSING20_DISTRIBUTOR_MODEL=opus46 \
 MISSING20_DISTRIBUTOR_RETAINED_PROJECTION=1 \
 MISSING20_DISTRIBUTOR_HANDOFF_SYNC=0 \
 MISSING20_LIVE_SOURCES_AUTOSTART=0 \

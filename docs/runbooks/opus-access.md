@@ -1,12 +1,14 @@
 # Restore Opus 4.6 access
 
-Verified September 12, 2026. The application uses AWS profile `missing20-sandbox`, which assumes `Missing20DeveloperRole`, in `us-west-2`. A real minimal Converse request to `us.anthropic.claude-opus-4-6-v1` returned `AccessDeniedException`: no identity-based policy allows `bedrock:InvokeModel`. A separate `GetInferenceProfile` request was also denied. Login is valid and Nova Pro works. This evidence establishes an IAM blocker, not an expired session or a model-quality result.
+**Restored September 12, 2026.** After the administrator completed the console workflow, the application's original `missing20-sandbox` profile successfully invoked `us.anthropic.claude-opus-4-6-v1` in `us-west-2`. Both Converse and ConverseStream returned real answers (10 input / 5 output tokens each), and GetInferenceProfile returned `ACTIVE` with Virginia, Ohio and Oregon destinations. The isolated business workspace now explicitly selects `opus46`. See the [application acceptance record](../audits/2026-09-12-opus-restoration.md).
 
-The existing Chrome console shows two inline role policies: Nova Pro and Nova 2 Lite. It also shows a permissions boundary. The boundary's contents have not yet been verified. The application role cannot list its IAM policies through the API. Do not broaden that role's IAM administration rights to fix inference access.
+The earlier denial was real: no identity-based policy allowed `bedrock:InvokeModel` for Opus, and GetInferenceProfile was also denied. A separate browser authentication issue was resolved by starting a fresh console login in the existing Chrome profile. The CLI session remained valid. These were distinct checks.
+
+Before the administrator completed the change, the console showed Nova Pro and Nova 2 Lite policies. Its existing `Missing20DeveloperBoundary` was inspected: its regional restriction excludes both Bedrock invocation actions, so it did not need modification for this request. The policy below was prepared on the console review page. On resuming after the user's completion message, that page was signed out and effective Opus access was verified through the application role. The agent did not itself click Create policy and has not read back the final attached policy document; effective invocation is verified, exact post-change IAM configuration is not asserted. Do not broaden the application's IAM administration rights merely to inspect its policies.
 
 ## Administrator action
 
-Open IAM → Roles → `Missing20DeveloperRole` → Permissions using an administrator identity. Add a separate, narrowly scoped policy for this model; retain existing policies. The following is a review template, **not an applied change**. Replace `ACCOUNT_ID` with the intended AWS account ID.
+For future recovery, open IAM → Roles → `Missing20DeveloperRole` → Permissions using an administrator identity. Inspect existing policies before adding anything, to avoid duplicates. The following is the narrowly scoped review template prepared for `Missing20Opus46Inference`, **not an exported final policy**. Replace `ACCOUNT_ID` with the intended AWS account ID.
 
 ```json
 {
@@ -51,4 +53,4 @@ After the administrator applies the intended change, repeat one minimal request 
 
 Select Opus explicitly only after invocation succeeds. Do not silently fall back to Nova. Historical Opus success does not prove current authorization, and a successful connectivity probe does not establish answer accuracy.
 
-The existing [paired evaluation protocol](../research/2026-09-12-paired-evaluation-protocol.md) freezes Nova for both single-agent and Graph candidates. An Opus comparison needs a separately frozen model configuration and pricing/budget allowance before paid runs; do not mix models and attribute a quality change to multi-agent architecture. The native conversation's repeated-evidence context growth also needs correction regardless of model selection.
+The existing [paired evaluation protocol](../research/2026-09-12-paired-evaluation-protocol.md) freezes Nova for both single-agent and Graph candidates. An Opus comparison needs a separately frozen model configuration and pricing/budget allowance before paid runs; do not mix models and attribute a quality change to multi-agent architecture. Native conversation history growth was corrected in the [runtime restoration](../audits/2026-09-12-runtime-restoration.md), independently of model selection.
