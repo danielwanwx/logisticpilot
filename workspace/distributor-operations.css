@@ -1537,62 +1537,103 @@ body.operations-shell[data-ops-view="operations"] #ops-economic-panel > :not(.op
 .ops-economic-execution-details > summary,
 .ops-economic-decision-details > summary,
 .ops-photo-review-inline-details > summary,
-.ops-selected-batch-details > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+.ops-selected-batch-details > summary,
+.ops-photo-analysis-details > summary,
+.ops-receiving-photo-history > summary,
+.ops-all-case-photo-history > summary,
+.ops-manual-event-details > summary,
+.ops-recording-details > summary,
+.ops-photo-analysis-evidence > summary,
+.ops-photo-analysis-stages > summary,
+.ops-economic-trace > summary,
+.ops-chat-activity-details > summary,
+.ops-evidence-context-details > summary,
+.ops-photo-intake-details > summary {
+  display: list-item;
   padding: 10px 0;
   color: #476654;
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
-  list-style: none;
 }
-.ops-economic-details > summary::-webkit-details-marker,
-.ops-economic-execution-details > summary::-webkit-details-marker,
-.ops-economic-decision-details > summary::-webkit-details-marker,
-.ops-photo-review-inline-details > summary::-webkit-details-marker,
-.ops-selected-batch-details > summary::-webkit-details-marker { display: none; }
-.ops-economic-details > summary::marker,
-.ops-economic-execution-details > summary::marker,
-.ops-economic-decision-details > summary::marker,
-.ops-photo-review-inline-details > summary::marker,
-.ops-selected-batch-details > summary::marker { content: ""; }
-.ops-economic-details > summary::after,
-.ops-economic-execution-details > summary::after,
-.ops-economic-decision-details > summary::after,
-.ops-photo-review-inline-details > summary::after,
-.ops-selected-batch-details > summary::after {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  content: "";
-  transform: translateY(-2px) rotate(45deg);
-}
-.ops-economic-details[open] > summary::after,
-.ops-economic-execution-details[open] > summary::after,
-.ops-economic-decision-details[open] > summary::after,
-.ops-photo-review-inline-details[open] > summary::after,
-.ops-selected-batch-details[open] > summary::after { transform: translateY(2px) rotate(-135deg); }
 .ops-economic-details > summary:hover,
 .ops-economic-execution-details > summary:hover,
 .ops-economic-decision-details > summary:hover,
 .ops-photo-review-inline-details > summary:hover,
-.ops-selected-batch-details > summary:hover { color: #28784a; }
+.ops-selected-batch-details > summary:hover,
+.ops-photo-analysis-details > summary:hover,
+.ops-receiving-photo-history > summary:hover,
+.ops-all-case-photo-history > summary:hover,
+.ops-manual-event-details > summary:hover,
+.ops-recording-details > summary:hover,
+.ops-photo-analysis-evidence > summary:hover,
+.ops-photo-analysis-stages > summary:hover,
+.ops-economic-trace > summary:hover,
+.ops-chat-activity-details > summary:hover,
+.ops-evidence-context-details > summary:hover,
+.ops-photo-intake-details > summary:hover { color: #28784a; }
 .ops-economic-details > summary:focus-visible,
 .ops-economic-execution-details > summary:focus-visible,
 .ops-economic-decision-details > summary:focus-visible,
 .ops-photo-review-inline-details > summary:focus-visible,
-.ops-selected-batch-details > summary:focus-visible { outline: 2px solid rgb(55 174 96 / .26); outline-offset: 3px; border-radius: 5px; }
+.ops-selected-batch-details > summary:focus-visible,
+.ops-photo-analysis-details > summary:focus-visible,
+.ops-receiving-photo-history > summary:focus-visible,
+.ops-all-case-photo-history > summary:focus-visible,
+.ops-manual-event-details > summary:focus-visible,
+.ops-recording-details > summary:focus-visible,
+.ops-photo-analysis-evidence > summary:focus-visible,
+.ops-photo-analysis-stages > summary:focus-visible,
+.ops-economic-trace > summary:focus-visible,
+.ops-chat-activity-details > summary:focus-visible,
+.ops-evidence-context-details > summary:focus-visible,
+.ops-photo-intake-details > summary:focus-visible { outline: 2px solid rgb(55 174 96 / .26); outline-offset: 3px; border-radius: 5px; }
 .ops-economic-details[open] > summary,
 .ops-economic-execution-details[open] > summary,
 .ops-economic-decision-details[open] > summary,
 .ops-photo-review-inline-details[open] > summary,
-.ops-selected-batch-details[open] > summary { margin-bottom: 4px; }
+.ops-selected-batch-details[open] > summary,
+.ops-photo-analysis-details[open] > summary,
+.ops-receiving-photo-history[open] > summary,
+.ops-all-case-photo-history[open] > summary,
+.ops-manual-event-details[open] > summary,
+.ops-recording-details[open] > summary,
+.ops-photo-analysis-evidence[open] > summary,
+.ops-photo-analysis-stages[open] > summary,
+.ops-economic-trace[open] > summary,
+.ops-chat-activity-details[open] > summary,
+.ops-evidence-context-details[open] > summary,
+.ops-photo-intake-details[open] > summary { margin-bottom: 6px; }
+#ops-photo-review-inline-details > summary > span { color: #476654; }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  #ops-photo-review-inline-details > summary > span {
+    display: inline-block;
+    color: transparent;
+    background: linear-gradient(90deg, #476654 0%, #476654 39%, #d8eee0 50%, #476654 61%, #476654 100%);
+    background-position: 100% 0;
+    background-size: 240% 100%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: ops-inspection-text-sheen 1.1s ease-out 1 both;
+  }
+  #ops-photo-review-inline-details[hidden] > summary > span { animation-play-state: paused; }
+}
+@keyframes ops-inspection-text-sheen {
+  from { background-position: 100% 0; }
+  99% { background-position: -100% 0; }
+  to { background-image: none; color: inherit; -webkit-text-fill-color: currentColor; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #ops-photo-review-inline-details > summary > span {
+    color: #476654;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
+}
 body.operations-shell .ops-economic-decision-details[open] .ops-economic-selection { display: block; }
 .ops-economic-difference { justify-content: flex-start; }
 .ops-economic-difference .ops-estimate-badge { margin-left: auto; padding: 4px 6px; border-radius: 999px; color: #587066; background: #e7f1e9; font-size: 9px; font-weight: 700; }
