@@ -1,5 +1,23 @@
 # Project delivery requirements
 
+## Minimal product copy — explicit user requirement
+
+- Default views show functional titles, essential business values/statuses,
+  labeled inputs and actions. Remove nonessential explanatory small print,
+  repeated eyebrows, instructions, disclaimers about implementation, and
+  descriptions of what a module does.
+- Explain a module, case, part or decision only after the user explicitly
+  opens its details. Do not turn a single expanded section into a report of
+  every supporting explanation; use focused business details.
+- Backend plumbing (model identifiers, tokens, source revisions, transport,
+  internal case hashes and implementation narratives) does not belong in
+  customer-facing default views. Keep diagnostics in backend/audit records.
+- Preserve meaningful values, honest concise estimate/conditional labels,
+  actionable errors, explicit requested agent answers, and the order/lot/
+  quantity needed to approve an action. Do not hide these with blanket CSS.
+- Keep the approved visual composition and live backend behavior unchanged
+  when simplifying copy. The user owns final visual review; no UI unit tests.
+
 ## Approved visual direction — do not replace (September 13 user correction)
 
 - Preserve Claude's approved dashboard composition in

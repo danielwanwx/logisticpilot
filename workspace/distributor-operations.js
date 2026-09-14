@@ -1800,9 +1800,14 @@
       firstText(provider, ["region"]),
       finite(numberFrom(usage.elapsed_ms)) ? `${formatNumber(numberFrom(usage.elapsed_ms))} ms` : "",
     ].filter(Boolean).join(" · ");
-    setText("ops-economic-model-identity", [status ? pretty(status) : "Status unavailable", identity].filter(Boolean).join(" · ") || "Model unavailable");
-    setText("ops-economic-model-title", stale ? "Agent recommendation · prior snapshot" : "Agent recommendation");
-    setText("ops-economic-model-decision", economicValueText(model.decision, "Decision unavailable from the source."));
+    // Keep provider, model, region, and timing in the source projection only.
+    setText("ops-economic-model-identity", "");
+    setText("ops-economic-model-title", "Agent recommendation");
+    const decision = economicValueText(model.decision, "Decision unavailable from the source.");
+    const modelFailure = /MODEL_BUDGET_EXHAUSTED|BUDGET_EXHAUSTED/i.test(`${status} ${decision}`);
+    setText("ops-economic-model-decision", modelFailure
+      ? "The recommendation is unavailable right now. Dispatch checks remain available below."
+      : decision);
     const note = $("ops-economic-model-note");
     if (note) {
       const notRun = status === "NOT_RUN";
@@ -1918,7 +1923,6 @@
       const sourceLink = document.createElement("a"); sourceLink.href = safeHref(postage.sourceRef); sourceLink.target = "_blank"; sourceLink.rel = "noopener noreferrer"; sourceLink.textContent = postageDetail.textContent; sourceLink.title = postage.sourceRef;
       postageDetail.replaceChildren(sourceLink);
     }
-    postageFact.append(postageDetail);
     const deadlineFact = document.createElement("div"); deadlineFact.className = "ops-economic-fact";
     const deadlineLabel = document.createElement("span"); deadlineLabel.textContent = dispatches.length > 1 ? "First dispatch deadline" : "Dispatch deadline";
     const deadline = firstText(candidate, ["dispatch_deadline"]) || firstText(dispatches[0], ["deadline"]);
@@ -1926,6 +1930,9 @@
     deadlineFact.append(deadlineLabel, deadlineValue);
     facts.append(postageFact, deadlineFact); card.append(facts);
 
+    const candidateDetails = document.createElement("details"); candidateDetails.className = "ops-economic-candidate-details";
+    const candidateDetailsSummary = document.createElement("summary"); candidateDetailsSummary.textContent = "View conditions and estimate details";
+    candidateDetails.append(candidateDetailsSummary, postageDetail);
     if (dispatches.length > 1) {
       const tail = dispatches[dispatches.length - 1];
       const tailFact = document.createElement("div"); tailFact.className = "ops-economic-fact";
@@ -1936,19 +1943,20 @@
         firstText(tail, ["lot"]) ? `Lot ${firstText(tail, ["lot"])}` : "",
       ].filter(Boolean).join(" · ");
       tailFact.append(tailLabel, tailDeadline);
-      if (tailDetail.textContent) tailFact.append(tailDetail);
+      if (tailDetail.textContent) candidateDetails.append(tailDetail);
       facts.append(tailFact);
     }
 
-    const conditions = document.createElement("p"); conditions.className = "ops-economic-conditions"; conditions.textContent = `Conditions: ${economicConditionsText(candidate.conditions)}`; card.append(conditions);
+    const conditions = document.createElement("p"); conditions.className = "ops-economic-conditions"; conditions.textContent = `Conditions: ${economicConditionsText(candidate.conditions)}`; candidateDetails.append(conditions);
     if (isRecord(candidate.proposal_effect)) {
       const effect = document.createElement("p"); effect.className = "ops-economic-effect";
       const effectSummary = economicEffectSummary({ proposal_effect: candidate.proposal_effect }, next);
       effect.textContent = effectSummary
         ? `Proposal effect: ${effectSummary}`
         : "Proposal effect: source detail unavailable.";
-      card.append(effect);
+      candidateDetails.append(effect);
     }
+    card.append(candidateDetails);
     const actions = document.createElement("div"); actions.className = "ops-economic-candidate-actions";
     if (state.label === "Executable" && id) {
       const button = document.createElement("button"); button.type = "button"; button.className = "button button-primary"; button.dataset.candidateId = id;
@@ -2364,8 +2372,10 @@
       const incident = document.createElement("div"); incident.className = "ops-network-incident";
       const incidentIcon = document.createElement("i"); incidentIcon.className = "ph ph-warning"; incidentIcon.setAttribute("aria-hidden", "true");
       const incidentAlert = activeAlerts[0] || incidentAlerts.find((alert) => /LOT|BATCH|SHORT|MISMATCH|QUALITY|INSPECTION/i.test(firstText(alert, ["code", "kind", "message", "detail"]))) || incidentAlerts[0];
-      const incidentCode = firstText(incidentAlert, ["code", "kind"]) || "Incident evidence";
-      incident.append(incidentIcon, document.createTextNode(`${incidentCode} · ${activeAlerts.length ? "open · evidence highlighted" : "resolved · evidence aligned"}`));
+      const incidentMessage = activeAlerts.length
+        ? `${activeAlerts.length} issue${activeAlerts.length === 1 ? "" : "s"} to review`
+        : "Issue resolved";
+      incident.append(incidentIcon, document.createTextNode(incidentMessage));
       agentColumn.append(incident);
     }
 
@@ -3260,22 +3270,21 @@
       readback.hidden = !approval;
       readback.textContent = approval
         ? retained
-          ? `Recorded completion confirmed by ${text(approval.manager_id) || "manager unavailable"} at ${formatDate(approval.approved_at)} · ${text(approval.event_id) || "event unavailable"}${approval.recovered === true ? " · recovered from retained event result" : ""}.`
-          : `Approved by ${text(approval.manager_id) || "manager unavailable"} at ${formatDate(approval.approved_at)} · ${text(approval.event_id) || "event unavailable"}${approval.recovered === true ? " · recovered from retained event result" : ""}.`
+          ? `Recorded completion confirmed by ${text(approval.manager_id) || "manager unavailable"} at ${formatDate(approval.approved_at)}.`
+          : `Approved by ${text(approval.manager_id) || "manager unavailable"} at ${formatDate(approval.approved_at)}.`
         : "";
     }
     panel.hidden = !proposal || text(proposal.status) === "APPLIED" || text(proposal.case_id) && text(proposal.case_id) !== text(next?.case_id);
     if (panel.hidden) return;
     const event = isRecord(proposal.event) ? proposal.event : {};
     const fields = Object.entries(event)
-      .filter(([key]) => !["event_id", "type", "occurred_at", "synthetic"].includes(key))
+      .filter(([key]) => !["event_id", "type", "occurred_at", "synthetic", "evidence_ref", "pick_evidence_ref"].includes(key))
       .map(([key, value]) => `${pretty(key)}: ${Array.isArray(value) ? value.join(", ") : String(value)}`);
-    const actionCopy = recordedOutcome
-      ? `Recorded event status: ${pretty(proposalStatus || "unavailable")}. No native execution is attempted.`
-      : retained
-      ? "This confirms a recorded completed event; no new native execution is attempted."
-      : "Approval checks this exact current-case revision before one native execution.";
-    setText("ops-proposal-summary", `${text(proposal.case_id) || text(next?.case_id)} · PO ${text(proposal.purchase_order) || text(next?.purchase_order) || "unavailable"} · ${pretty(event.type || "operation")}. ${fields.join(" · ")}. ${proposalSourceLabel(proposal.source)} ${actionCopy}`);
+    setText("ops-proposal-summary", [
+      `PO ${text(proposal.purchase_order) || text(next?.purchase_order) || "unavailable"}`,
+      pretty(event.type || "operation"),
+      ...fields,
+    ].join(" · "));
     button.disabled = processingEvent || !confirmationPending || !next?.available || !sourceState?.hidden || !text($("ops-manager-id")?.value) || (!retained && !freshActionsAllowed(next));
   }
 
@@ -3935,7 +3944,7 @@
         ? "Photo analysis is not configured for this case; the attachment remains manual evidence."
         : !hasPhoto ? "Choose a JPEG or PNG photo to begin."
           : !selectedPhotoLot ? "Choose a current ERP lot to set the analysis scope."
-            : "The model reads visible evidence only; it does not update stock.";
+            : "";
       feedback.className = `ops-feedback${photoAnalysisFeedback.tone ? ` is-${photoAnalysisFeedback.tone}` : ""}`;
       feedback.textContent = photoAnalysisPending ? "Analyzing photo…" : photoAnalysisFeedback.message || defaultMessage;
     }

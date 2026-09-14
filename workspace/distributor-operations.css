@@ -1223,3 +1223,40 @@ body.operations-shell[data-ops-view="operations"] #ops-photos-panel:not(.is-expa
   .ops-status-strip { grid-template-columns: minmax(0, 1fr) auto; }
   .ops-status-action { justify-self: end; }
 }
+
+/* Keep default views focused on titles, values, statuses, inputs, and actions. */
+body.operations-shell .ops-panel-header .object-label,
+body.operations-shell #ops-hero-context,
+body.operations-shell #ops-hero-case,
+body.operations-shell #ops-hero-state,
+body.operations-shell #ops-overview-copy,
+body.operations-shell #ops-economic-subtitle,
+body.operations-shell #ops-evidence-copy,
+body.operations-shell #ops-gate-note,
+body.operations-shell #ops-photo-purpose-guidance,
+body.operations-shell .ops-photo-intake-copy p,
+body.operations-shell #ops-agent-tools-note,
+body.operations-shell .ops-chat-note,
+body.operations-shell #ops-financials-note,
+body.operations-shell .ops-history-note,
+body.operations-shell #ops-contract-meta,
+body.operations-shell #ops-chat-provider,
+body.operations-shell #ops-chat-context,
+body.operations-shell #ops-economic-model-identity,
+body.operations-shell .brand-lockup small,
+body.operations-shell .ops-overview-record,
+body.operations-shell .ops-economic-selection,
+body.operations-shell .ops-network-kicker,
+body.operations-shell .ops-economic-candidate-id,
+body.operations-shell #ops-chat-activity-details,
+body.operations-shell #ops-evidence-context-details,
+body.operations-shell .ops-recording-details,
+body.operations-shell #ops-economic-model-trace,
+body.operations-shell #ops-chat-answer > .ops-empty {
+  display: none;
+}
+
+body.operations-shell[data-ops-view="agent"] #ops-hero-copy,
+body.operations-shell[data-ops-view="operations"] #ops-hero-copy {
+  display: none;
+}
