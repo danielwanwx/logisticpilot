@@ -1,5 +1,15 @@
 # LogisticPilot
 
+**Current recording path (September 14 UTC):** the 25-part receiving exception,
+PO25 / SO19, real Strands/Bedrock analysis and verified ERP execution:
+**20 dispatched, 5 held**. Start with the [current claim manifest](docs/submission/current-claim-manifest.md),
+[recording plan](docs/demo/five-minute-demo.md),
+[current architecture](docs/architecture/current-recording.md), and
+[competition/product review](docs/research/2026-09-14-recording-readiness-and-competition.md).
+The connected workspace uses Dashboard and Operations with a shared Agent.
+The named PO20 and earlier billing results below are separate historical paths;
+their model, multi-agent, SaaS and architecture claims do not describe this run.
+
 Economic baseline acceptance: [economic decision → ERP dispatch](docs/audits/2026-09-13-economic-poc-acceptance.md). An isolated 25-unit order now has a real Bedrock comparison and an approved 20-unit native ERP dispatch, with 5 units still held. The $24.80 postage difference is a conditional estimate, not realized savings.
 
 Photo intake update: [live photo → cited decision → approved ERP dispatch](docs/audits/2026-09-13-photo-intake-live-acceptance.md). On isolated PO24 / SO18, real Opus identified visible carton damage; the economic agent cited that observation, and browser approval produced a 20-unit native ERP dispatch with 5 units still awaiting inspection. No B5 failure was entered. The public photograph is a labeled POC input, and the five-unit hold comes from receiving policy, not inferred carton contents. The audit preserves Nova's missed damage and the limited two-image comparison. This demo explicitly sets `MISSING20_OPERATIONS_PHOTO_MODEL_ID=us.anthropic.claude-opus-4-6-v1`; the default remains Nova Pro.
