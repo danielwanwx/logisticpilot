@@ -10,7 +10,7 @@ Audience: a small parts distributor already using ERPNext, with one operator res
 
 Product sentence: **LogisticPilot helps small distributors investigate receiving exceptions and keep eligible orders moving.**
 
-Do not open with agent counts, a technology stack, a generic supply-chain dashboard or a list of integrations. Open with the goods and the customer consequence. The proposed primary take is a new isolated instance of the 25-part scenario. The already completed PO25 remains the backup result walkthrough. Await the user's scene preference before replacing the current preview or provisioning a recording instance.
+Do not open with agent counts, a technology stack, a generic supply-chain dashboard or a list of integrations. Open with the goods and the customer consequence. The primary rehearsal uses a new isolated instance of the 25-part scenario, authorized by the user's subsequent request for a complete rehearsal. The already completed PO25 remains the backup result walkthrough; preserve its current preview and records.
 
 ## Readiness judgment
 
