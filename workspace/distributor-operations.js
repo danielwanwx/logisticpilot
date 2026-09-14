@@ -54,7 +54,7 @@
   }
   const opsTargetView = (target) => {
     const normalized = text(target).replace(/^#+/, "");
-    if (normalized === "ops-chat-panel" || normalized === "ops-overview" || normalized === "ops-economic-panel") return "agent";
+    if (normalized === "ops-chat-panel" || normalized === "ops-overview" || normalized === "ops-economic-panel") return "operations";
     return "operations";
   };
   function opsTargetRoute(target, currentHref = "http://localhost/operations") {
@@ -1464,8 +1464,10 @@
 
   function agentProviderDisplay(next) {
     const conversation = isRecord(next?.conversation) ? next.conversation : {};
-    const status = (firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
-    const provider = firstProvider(conversation, ["provider_label", "provider", "model"])
+    const assistant = isRecord(next?.assistant) ? next.assistant : {};
+    const status = (firstText(assistant, ["status", "state"]) || firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
+    const provider = firstProvider(assistant, ["provider_label", "provider", "model"])
+      || firstProvider(conversation, ["provider_label", "provider", "model"])
       || firstProvider(next, ["conversation_provider", "provider", "model"]);
     return provider || (/UNAVAILABLE|ERROR|FAILED|DISABLED/.test(status) ? "Unavailable" : "Ask agent");
   }
@@ -1607,6 +1609,8 @@
   let pollTimer = null;
   let lastProjectionAt = "";
   let retainedConversation = null;
+  let chatTranscript = [];
+  let chatCaseId = "";
   let voiceController = null;
   let pendingAllocationAction = null;
   let allocationFeedback = null;
@@ -1620,8 +1624,12 @@
   let selectedPhotoPurpose = "overview";
   let selectedPhotoSupersedesAttachmentId = "";
   let photoAnalysisPending = false;
+  let agentUploadRequested = false;
+  let agentPhotoAttachmentId = "";
+  let agentPhotoCaseId = "";
   let photoAnalysisFeedback = { message: "", tone: "" };
   let evidenceDrawerTrigger = null;
+  let agentDrawerTrigger = null;
 
   function setText(id, value) {
     const node = $(id);
@@ -1645,10 +1653,10 @@
   function showSourceError(error, { configuredSourceFailure = false } = {}) {
     const retained = isRetainedEvidence(projection?.evidence_mode);
     sourceState.hidden = false;
-    setText("ops-source-title", retained ? "Retained operation evidence remains available" : "Current operation source unavailable");
+    setText("ops-source-title", retained ? "Last saved order is available" : "Order couldn’t load");
     setText("ops-source-detail", retained
-      ? "The retained as-of projection remains visible; fresh operation facts were not requested or inferred."
-      : error?.message || "The source did not return a usable projection. Quantities are unknown.");
+      ? "Showing the latest saved order. Try again for an update."
+      : "Try again.");
     setConnection(retained ? "Retained evidence" : "Unavailable", retained ? "cyan" : "danger");
     if (retained) {
       renderRefreshState({ retryPending: Boolean(lastProjectionAt) });
@@ -1661,8 +1669,8 @@
     if (!projection || configuredSourceFailure) {
       content.hidden = true;
       disabled.hidden = false;
-      disabled.querySelector("h2").textContent = configuredSourceFailure ? "Current operation source unavailable" : "Operation source unavailable";
-      disabled.querySelector("p").textContent = "No quantities, allocation, benchmark, or delivery state are inferred until the source responds.";
+      disabled.querySelector("h2").textContent = "Order couldn’t load";
+      disabled.querySelector("p").textContent = "Try again.";
     }
     updateEventButton();
     syncFreshEventControls(projection);
@@ -1768,9 +1776,7 @@
     const view = document.body.dataset.opsView || "dashboard";
     const title = !available
       ? "Operation facts unavailable"
-      : view === "agent"
-        ? "Investigate this order"
-        : view === "operations"
+      : view === "operations"
           ? "Receive & fulfill"
           : finite(usable)
             ? usable > 0 ? `${formatNumber(usable)} ${unit} ready to ship` : finite(dispatched) && dispatched > 0 ? `${formatNumber(dispatched)} ${unit} dispatched` : `${formatNumber(usable)} ${unit} ready to ship`
@@ -1781,9 +1787,7 @@
                 : "Order facts awaiting source evidence";
     const copy = !available
       ? "Current order facts are unavailable."
-      : view === "agent"
-        ? "Review the evidence and ask the agent what should move next."
-        : view === "operations"
+      : view === "operations"
           ? "Capture receiving evidence, confirm the exact action, and hand it to a manager."
           : finite(dispatched) && dispatched > 0
             ? `${formatNumber(dispatched)} ${unit} dispatched${finite(awaitingRelease) && awaitingRelease > 0 ? ` · ${formatNumber(awaitingRelease)} awaiting release` : finite(held) && held > 0 ? ` · ${formatNumber(held)} awaiting release` : ""}`
@@ -1794,7 +1798,7 @@
               : purchaseOrder
                 ? `Order ${purchaseOrder}`
                 : "Current order status";
-    const context = view === "agent" ? "Investigate this order" : view === "operations" ? "Receive & fulfill" : "Overview";
+    const context = view === "operations" ? "Receive & fulfill" : "Overview";
     setText("ops-hero-context", context);
     setText("ops-title", title);
     setText("ops-hero-copy", copy);
@@ -1934,20 +1938,17 @@
     // Keep provider, model, region, and timing in the source projection only.
     setText("ops-economic-model-identity", "");
     setText("ops-economic-model-title", "Agent recommendation");
-    const decision = economicValueText(model.decision, "Decision unavailable from the source.");
+    const decision = status === "NOT_RUN"
+      ? "No agent comparison yet."
+      : economicValueText(model.decision, "Decision unavailable from the source.");
     const modelFailure = /MODEL_BUDGET_EXHAUSTED|BUDGET_EXHAUSTED/i.test(`${status} ${decision}`);
     setText("ops-economic-model-decision", modelFailure
       ? "The recommendation is unavailable right now. Dispatch checks remain available below."
       : decision);
     const note = $("ops-economic-model-note");
     if (note) {
-      const notRun = status === "NOT_RUN";
-      note.hidden = !notRun && !stale;
-      note.textContent = notRun
-        ? "Model capabilities were not run for this proposal; the dispatch checks below remain source-provided."
-        : stale
-          ? "This recommendation is a prior snapshot; the current dispatch state is shown below."
-          : "";
+      note.hidden = true;
+      note.textContent = "";
     }
     const citations = $("ops-economic-model-citations");
     if (citations) {
@@ -1972,7 +1973,6 @@
         badge.append(icon, labelNode);
         citations.append(badge);
       });
-      if (!values.length) citations.append(emptyList("Model citations unavailable from the source."));
     }
     const trace = $("ops-economic-model-trace");
     const traceValue = $("ops-economic-model-trace-value");
@@ -2095,7 +2095,7 @@
       button.addEventListener("click", () => { void prepareEconomicProposal(id); });
       actions.append(button);
     } else {
-      const note = document.createElement("span"); note.className = "ops-economic-unavailable"; note.textContent = state.label === "Conditional" ? "Prepare when the dispatch checks are satisfied." : "Candidate support is unavailable from the source."; actions.append(note);
+      actions.hidden = true;
     }
     card.append(actions);
     return card;
@@ -2123,6 +2123,29 @@
       : economicEffectQuantity(proposal, next);
     const hasCompletedDispatch = /^(APPLIED|ALREADY_APPLIED)$/.test(appliedStatus)
       || finite(snapshot.dispatched) && snapshot.dispatched > 0;
+    const completedEconomicProposal = /^(APPLIED|ALREADY_APPLIED)$/.test(appliedStatus);
+    const heldQuantity = finite(snapshot.awaiting_release)
+      ? snapshot.awaiting_release
+      : quantity(next, "held");
+    const outcome = $("ops-economic-outcome");
+    const executionDetails = $("ops-economic-execution-details");
+    const executionDetail = $("ops-economic-execution-detail");
+    if (outcome) {
+      const outcomeParts = [
+        finite(dispatchedQuantity) ? formatNumber(dispatchedQuantity) + " dispatched" : "",
+        finite(heldQuantity) && heldQuantity > 0 ? formatNumber(heldQuantity) + " held" : "",
+      ].filter(Boolean);
+      outcome.hidden = !completedEconomicProposal;
+      outcome.textContent = completedEconomicProposal
+        ? outcomeParts.join(" · ") || "Dispatch recorded"
+        : "";
+    }
+    if (executionDetails && executionDetail) {
+      executionDetails.hidden = !completedEconomicProposal;
+      executionDetail.textContent = completedEconomicProposal
+        ? economicEffectSummary(proposal, next) || "Execution details are unavailable from the current source."
+        : "";
+    }
     const subtitle = (hasCompletedDispatch
       ? [
         finite(dispatchedQuantity) ? `${formatNumber(dispatchedQuantity)} dispatched` : "",
@@ -2140,17 +2163,26 @@
     if (selection) {
       const selected = text(proposal.selected_candidate_id);
       const effect = economicEffectSummary(proposal, next);
+      const selectedLabel = selected === "split20"
+        ? "20 now, 5 later"
+        : selected === "consolidation25"
+          ? "25 together"
+          : "";
       selection.textContent = [
-        selected ? `Selected candidate: ${selected}` : "No candidate selected; review the dispatch checks before preparing one.",
-        effect ? `Proposal effect readback: ${effect}` : "",
+        selectedLabel ? `Selected plan: ${selectedLabel}` : "No plan selected.",
+        effect || "",
       ].filter(Boolean).join(" · ");
     }
     const candidates = $("ops-economic-candidates");
     if (candidates) {
       const values = Array.isArray(proposal.candidates) ? proposal.candidates : [];
       candidates.replaceChildren(...(values.length ? values.map((candidate) => renderEconomicCandidate(candidate, next)) : [emptyList("No dispatch candidates were supplied by the source.")]));
+      candidates.hidden = completedEconomicProposal;
       candidates.querySelectorAll("button[data-candidate-id]").forEach((button) => {
-        button.disabled = preparingEconomic || next?.available !== true;
+        button.disabled = preparingEconomic
+          || next?.available !== true
+          || !freshActionsAllowed(next)
+          || !sourceState?.hidden;
         if (preparingEconomic) button.setAttribute("aria-busy", "true"); else button.removeAttribute("aria-busy");
       });
     }
@@ -2158,16 +2190,23 @@
     const postageDifference = economicPostageDifference(proposal);
     if (difference) {
       difference.replaceChildren();
-      difference.hidden = !postageDifference;
-      if (postageDifference) {
-        const label = document.createElement("span"); label.textContent = "Estimated postage difference · estimate only";
+      difference.hidden = !postageDifference || completedEconomicProposal;
+      if (postageDifference && !completedEconomicProposal) {
+        const label = document.createElement("span"); label.textContent = "Estimate difference ·";
         const amount = document.createElement("strong"); amount.textContent = `${postageDifference.currency} ${economicAmountText(postageDifference.amount)}`;
-        const note = document.createElement("span"); note.textContent = "Not savings achieved.";
-        difference.append(label, amount, note);
+        const badge = document.createElement("span"); badge.className = "ops-estimate-badge"; badge.textContent = "Estimate";
+        difference.append(label, amount, badge);
       }
     }
     const compare = $("ops-economic-compare");
-    if (compare) compare.disabled = preparingEconomic;
+    const actions = panel.querySelector(".ops-economic-actions");
+    if (actions) actions.hidden = completedEconomicProposal;
+    if (compare) {
+      compare.disabled = preparingEconomic
+        || next?.available !== true
+        || !freshActionsAllowed(next)
+        || !sourceState?.hidden;
+    }
     const sources = $("ops-economic-sources");
     if (sources) {
       sources.replaceChildren();
@@ -2226,6 +2265,38 @@
     document.body.classList.add("has-evidence-drawer");
     $("ops-open-evidence-drawer")?.setAttribute("aria-expanded", "true");
     window.requestAnimationFrame(() => $("ops-evidence-drawer-close")?.focus());
+  }
+
+  function agentDrawerUsesOverlay() {
+    return document.body.dataset.opsView === "dashboard"
+      || window.matchMedia?.("(max-width: 840px)").matches === true;
+  }
+
+  function openAgentDrawer(trigger = null) {
+    const panel = $("ops-chat-panel");
+    if (!panel) return;
+    agentDrawerTrigger = trigger || document.activeElement;
+    const backdrop = $("ops-agent-drawer-backdrop");
+    if (agentDrawerUsesOverlay()) {
+      document.body.classList.add("has-agent-drawer");
+      if (backdrop) backdrop.hidden = false;
+    } else {
+      document.body.classList.remove("has-agent-drawer");
+      if (backdrop) backdrop.hidden = true;
+    }
+    window.requestAnimationFrame(() => $("ops-question")?.focus());
+  }
+
+  function closeAgentDrawer({ restoreFocus = true } = {}) {
+    const backdrop = $("ops-agent-drawer-backdrop");
+    const hadDrawer = document.body.classList.contains("has-agent-drawer");
+    document.body.classList.remove("has-agent-drawer");
+    if (backdrop) backdrop.hidden = true;
+    const trigger = agentDrawerTrigger;
+    agentDrawerTrigger = null;
+    if (restoreFocus && hadDrawer && trigger && document.contains(trigger) && typeof trigger.focus === "function") {
+      trigger.focus();
+    }
   }
 
   function closeEvidenceDrawer() {
@@ -2389,16 +2460,24 @@
 
   function requestedOpsView() {
     const requested = text(new URLSearchParams(window.location.search).get("view")).toLowerCase();
-    if (["dashboard", "agent", "operations"].includes(requested)) return requested;
+    if (requested === "dashboard") return "dashboard";
+    if (["agent", "operations"].includes(requested)) return "operations";
     const hash = text(window.location.hash).toLowerCase();
-    if (["#ops-chat-panel", "#ops-overview", "#ops-economic-panel"].includes(hash)) return "agent";
+    if (["#ops-chat-panel", "#ops-overview", "#ops-economic-panel"].includes(hash)) return "operations";
     if (["#ops-flow-panel", "#ops-alerts-panel", "#ops-details", "#ops-documents-panel", "#ops-handoffs-panel", "#ops-evidence-panel", "#ops-photo-intake", "#ops-proposal-panel"].includes(hash)) return "operations";
     return "dashboard";
   }
 
-  function setOpsView(view, { scrollTarget = "" } = {}) {
-    const normalized = ["dashboard", "agent", "operations"].includes(view) ? view : "dashboard";
+  function requestedAgentDrawer() {
+    const requested = text(new URLSearchParams(window.location.search).get("view")).toLowerCase();
+    const hash = text(window.location.hash).toLowerCase();
+    return requested === "agent" || hash === "#ops-chat-panel";
+  }
+
+  function setOpsView(view, { scrollTarget = "", openAgent = false } = {}) {
+    const normalized = view === "dashboard" ? "dashboard" : "operations";
     document.body.dataset.opsView = normalized;
+    setText("ops-flow-title", normalized === "operations" ? "Receiving status" : "Current operation");
     document.querySelectorAll("[data-ops-view-link]").forEach((link) => {
       const selected = link.dataset.opsViewLink === normalized;
       link.classList.toggle("is-selected", selected);
@@ -2409,12 +2488,17 @@
       renderHero(projection);
       renderPhotos(projection);
     }
-    if (normalized === "agent" && scrollTarget === "ops-economic-panel") {
+    if (normalized === "operations" && scrollTarget === "ops-economic-panel") {
       const economicPanel = $("ops-economic-panel");
       const economicToggle = $("ops-economic-toggle");
       economicPanel?.classList.add("is-expanded");
       economicToggle?.setAttribute("aria-expanded", "true");
     }
+    if (openAgent || scrollTarget === "ops-chat-panel") {
+      openAgentDrawer();
+      return;
+    }
+    closeAgentDrawer({ restoreFocus: false });
     if (scrollTarget) {
       window.requestAnimationFrame(() => $(scrollTarget)?.scrollIntoView({ behavior: "smooth", block: "start" }));
     }
@@ -2449,7 +2533,10 @@
     if (!route) return;
     const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (route.href !== currentHref) window.history.pushState({}, "", route.href);
-    setOpsView(route.view, { scrollTarget: route.target });
+    setOpsView(route.view, {
+      scrollTarget: route.target === "ops-chat-panel" ? "" : route.target,
+      openAgent: route.target === "ops-chat-panel",
+    });
   }
 
   function networkNode({ key, icon, label, detail, target, alert = false, className = "" }) {
@@ -2529,9 +2616,71 @@
     managerColumn.append(managerKicker, manager);
     network.append(sourceColumn, agentColumn, managerColumn);
     graph.replaceChildren(network);
+    renderFindings(next, activeAlerts);
     setText("ops-overview-case", `${next.case_id || "Case unavailable"} · ${purchaseOrderDisplay(next) || "PO unavailable"}`);
     setText("ops-alert-focus-link", next._provided.alerts && activeAlerts.length === 0 ? "Review resolved incident" : "Focus active alert");
-    setText("ops-overview-copy", activeAlerts.length ? "Open incident evidence is highlighted." : incidentAlerts.length ? "Resolved incident evidence is retained." : "Source records flow into read-only reasoning and manager control.");
+    setText("ops-overview-copy", activeAlerts.length ? "Current exceptions need attention." : "Current affected orders from the source.");
+  }
+
+  function renderFindings(next, activeAlerts = []) {
+    const panel = $("ops-findings-summary");
+    if (!panel) return;
+    const alerts = activeAlerts.filter(isRecord).slice(0, 2);
+    const affectedOrders = next.allocations
+      .filter(isRecord)
+      .filter((allocation) => {
+        const requested = numberFromKeys(allocation, ["requested_quantity", "requested", "quantity"]);
+        const allocated = numberFromKeys(allocation, ["allocated", "allocated_quantity"]);
+        const backordered = numberFromKeys(allocation, ["backordered", "backorder_quantity", "unfulfilled"]);
+        return (finite(backordered) && backordered > 0) || (finite(requested) && finite(allocated) && allocated < requested);
+      })
+      .slice(0, 2);
+    panel.replaceChildren();
+    if (!alerts.length && !affectedOrders.length) {
+      panel.append(emptyList(next._provided.alerts || next._provided.allocations
+        ? "No current exceptions or affected orders were supplied."
+        : "Exception and order evidence is unavailable."));
+      return;
+    }
+    if (alerts.length) {
+      const group = document.createElement("div"); group.className = "ops-finding-group";
+      const label = document.createElement("span"); label.className = "object-label"; label.textContent = "Exceptions"; group.append(label);
+      alerts.forEach((alert) => {
+        const row = document.createElement("p");
+        const code = firstText(alert, ["code", "kind"]).toUpperCase();
+        const message = firstText(alert, ["message", "detail", "summary"]);
+        const qualityIssue = /QUALITY.*(EVIDENCE|REQUIRED)|INSPECTION.*(REQUIRED|PENDING)/.test(`${code} ${message}`.toUpperCase());
+        if (qualityIssue) {
+          const held = quantity(next, "held");
+          row.textContent = `${finite(held) && held > 0 ? `${formatNumber(held)} held · ` : ""}Inspection needed`;
+        } else if (message && !/^[A-Z0-9_-]+$/.test(message)) {
+          row.textContent = message;
+        } else {
+          row.textContent = "Needs review";
+        }
+        group.append(row);
+      });
+      panel.append(group);
+    }
+    if (affectedOrders.length) {
+      const group = document.createElement("div"); group.className = "ops-finding-group";
+      const label = document.createElement("span"); label.className = "object-label"; label.textContent = "Affected orders"; group.append(label);
+      affectedOrders.forEach((allocation) => {
+        const row = document.createElement("p");
+        const order = firstText(allocation, ["customer_order", "order_id", "sales_order", "order"]);
+        const backordered = numberFromKeys(allocation, ["backordered", "backorder_quantity", "unfulfilled"]);
+        const requested = numberFromKeys(allocation, ["requested_quantity", "requested", "quantity"]);
+        const allocated = numberFromKeys(allocation, ["allocated", "allocated_quantity"]);
+        const shortfall = finite(backordered) && backordered > 0
+          ? `${formatNumber(backordered)} backordered`
+          : finite(requested) && finite(allocated)
+            ? `${formatNumber(Math.max(0, requested - allocated))} not allocated`
+            : "Needs allocation review";
+        const strong = document.createElement("strong"); strong.textContent = order || "Affected order";
+        row.append(strong, document.createTextNode(` · ${shortfall}`)); group.append(row);
+      });
+      panel.append(group);
+    }
   }
 
   function renderSignalSources(next) {
@@ -3116,6 +3265,16 @@
     }
     return "";
   }
+
+  function assistantAnswer(assistant) {
+    return isRecord(assistant) ? cleanAnswer(assistant.answer || assistant.answer_text) : "";
+  }
+
+  function assistantDraftText(draft) {
+    if (typeof draft === "string") return cleanAnswer(draft);
+    if (!isRecord(draft)) return "";
+    return cleanAnswer(firstText(draft, ["summary", "title", "label", "action", "message", "description"]));
+  }
   function providerLabel(value) {
     if (typeof value === "string") return text(value);
     if (!isRecord(value)) return "";
@@ -3133,10 +3292,11 @@
   }
   function conversationProjectionState(next) {
     const conversation = next?.conversation;
-    const rawStatus = (firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
-    const message = cleanAnswer(firstText(conversation, ["error", "detail", "message"]) || firstText(next, ["conversation_message"]));
+    const assistant = isRecord(next?.assistant) ? next.assistant : {};
+    const rawStatus = (firstText(assistant, ["status", "state"]) || firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
+    const message = cleanAnswer(firstText(assistant, ["error", "detail", "message"]) || firstText(conversation, ["error", "detail", "message"]) || firstText(next, ["conversation_message"]));
     const status = rawStatus || (message ? "UNAVAILABLE" : "");
-    const answer = conversationAnswer(conversation) || cleanAnswer(next?.answer || next?.answer_text);
+    const answer = assistantAnswer(assistant) || conversationAnswer(conversation) || cleanAnswer(next?.answer || next?.answer_text);
     return { status, message, answer, hasState: Boolean(answer || /UNAVAILABLE|ERROR|FAILED|DISABLED/.test(status)) };
   }
   function retainConversationProjection(next, previous = null) {
@@ -3161,6 +3321,7 @@
           conversation_message: text(next.conversation_message) || state.message,
           conversation_provider: text(next.conversation_provider),
           conversation_context: text(next.conversation_context),
+          assistant: isRecord(next.assistant) ? { ...next.assistant } : null,
         },
       };
     }
@@ -3174,7 +3335,140 @@
     for (const key of ["conversation_status", "conversation_message", "conversation_provider", "conversation_context"]) {
       if (prior[key]) merged[key] = prior[key];
     }
+    if (!isRecord(next.assistant) && isRecord(prior.assistant)) merged.assistant = { ...prior.assistant };
     return { projection: merged, memory: prior };
+  }
+
+  const CONVERSATION_STORAGE_PREFIX = "missing20:operations:assistant:";
+
+  function conversationStorageKey(caseId) {
+    return `${CONVERSATION_STORAGE_PREFIX}${encodeURIComponent(caseId)}`;
+  }
+
+  function chatStorageKey(caseId) {
+    return `${CONVERSATION_STORAGE_PREFIX}${encodeURIComponent(caseId)}:transcript`;
+  }
+
+  function agentPhotoStorageKey(caseId) {
+    return `${CONVERSATION_STORAGE_PREFIX}${encodeURIComponent(caseId)}:photo`;
+  }
+
+  function chatMessage(record) {
+    if (!isRecord(record)) return null;
+    const role = /^(user|operator|manager)$/i.test(text(record.role || record.author)) ? "user" : "assistant";
+    const value = cleanAnswer(record.answer || record.content || record.text || record.message);
+    return value ? { role, content: value } : null;
+  }
+
+  function boundedTranscript(messages) {
+    return messages.filter(isRecord)
+      .map(chatMessage)
+      .filter(Boolean)
+      .slice(-12);
+  }
+
+  function transcriptFromConversation(value) {
+    if (Array.isArray(value)) return boundedTranscript(value);
+    if (isRecord(value) && Array.isArray(value.messages)) return boundedTranscript(value.messages);
+    const answer = conversationAnswer(value);
+    return answer ? [{ role: "assistant", content: answer }] : [];
+  }
+
+  function storedChatTranscript(caseId) {
+    if (!caseId) return [];
+    try {
+      const raw = window.sessionStorage?.getItem(chatStorageKey(caseId));
+      return raw ? boundedTranscript(JSON.parse(raw)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function persistChatTranscript() {
+    if (!chatCaseId) return;
+    try { window.sessionStorage?.setItem(chatStorageKey(chatCaseId), JSON.stringify(chatTranscript)); } catch { /* browser storage is optional */ }
+  }
+
+  function clearStoredChatTranscript(caseId) {
+    if (!caseId) return;
+    try { window.sessionStorage?.removeItem(chatStorageKey(caseId)); } catch { /* browser storage is optional */ }
+  }
+
+  function storedAgentPhoto(caseId) {
+    if (!caseId) return "";
+    try { return text(window.sessionStorage?.getItem(agentPhotoStorageKey(caseId))); } catch { return ""; }
+  }
+
+  function persistAgentPhoto(caseId, attachmentId) {
+    if (!caseId || !attachmentId) return;
+    try { window.sessionStorage?.setItem(agentPhotoStorageKey(caseId), attachmentId); } catch { /* browser storage is optional */ }
+  }
+
+  function clearStoredAgentPhoto(caseId) {
+    if (!caseId) return;
+    try { window.sessionStorage?.removeItem(agentPhotoStorageKey(caseId)); } catch { /* browser storage is optional */ }
+  }
+
+  function appendChatMessage(role, content) {
+    const message = cleanAnswer(content);
+    if (!message) return;
+    const normalizedRole = role === "user" ? "user" : "assistant";
+    const latest = chatTranscript.at(-1);
+    if (latest?.role === normalizedRole && latest.content === message) return;
+    chatTranscript = [...chatTranscript, { role: normalizedRole, content: message }].slice(-12);
+    persistChatTranscript();
+  }
+
+  function synchronizeChatTranscript(next, { caseChanged = false } = {}) {
+    const caseId = text(next?.case_id);
+    if (!caseId) return;
+    if (caseChanged || chatCaseId !== caseId) {
+      if (chatCaseId && chatCaseId !== caseId) clearStoredChatTranscript(chatCaseId);
+      chatCaseId = caseId;
+      chatTranscript = storedChatTranscript(caseId);
+      if (!chatTranscript.length) chatTranscript = transcriptFromConversation(next?.conversation);
+    }
+    const currentAnswer = assistantAnswer(next?.assistant) || conversationAnswer(next?.conversation);
+    if (currentAnswer && !asking) appendChatMessage("assistant", currentAnswer);
+  }
+
+  function storedConversation(caseId) {
+    if (!caseId) return null;
+    try {
+      const raw = window.sessionStorage?.getItem(conversationStorageKey(caseId));
+      const value = raw ? JSON.parse(raw) : null;
+      return isRecord(value) && text(value.caseId) === caseId ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function clearStoredConversation(caseId) {
+    if (!caseId) return;
+    try { window.sessionStorage?.removeItem(conversationStorageKey(caseId)); } catch { /* browser storage is optional */ }
+  }
+
+  function persistConversation(memory) {
+    if (!isRecord(memory) || !text(memory.caseId)) return;
+    try { window.sessionStorage?.setItem(conversationStorageKey(memory.caseId), JSON.stringify(memory)); } catch { /* browser storage is optional */ }
+  }
+
+  function hydrateConversation(next) {
+    const caseId = text(next?.case_id);
+    if (!caseId || conversationProjectionState(next).hasState) return next;
+    const stored = storedConversation(caseId);
+    if (!stored) return next;
+    return {
+      ...next,
+      conversation: Array.isArray(stored.conversation)
+        ? [...stored.conversation]
+        : isRecord(stored.conversation) ? { ...stored.conversation } : {},
+      ...(stored.conversation_status ? { conversation_status: stored.conversation_status } : {}),
+      ...(stored.conversation_message ? { conversation_message: stored.conversation_message } : {}),
+      ...(stored.conversation_provider ? { conversation_provider: stored.conversation_provider } : {}),
+      ...(stored.conversation_context ? { conversation_context: stored.conversation_context } : {}),
+      ...(isRecord(stored.assistant) ? { assistant: { ...stored.assistant } } : {}),
+    };
   }
 
   function appendInlineMarkdown(parent, value) {
@@ -3252,25 +3546,135 @@
     answerNode.replaceChildren(content);
   }
 
+  function renderChatStarter(answerNode) {
+    const starter = document.createElement("div");
+    starter.className = "ops-chat-starter";
+    const title = document.createElement("strong"); title.textContent = "How can I help?";
+    const copy = document.createElement("p"); copy.textContent = "Ask about this order or upload a receiving photo.";
+    const prompts = document.createElement("div"); prompts.className = "ops-chat-starter-actions";
+    ["What should happen next?", "What needs attention?"].forEach((prompt) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button button-quiet";
+      button.textContent = prompt;
+      button.addEventListener("click", () => {
+        const input = $("ops-question");
+        if (!input) return;
+        input.value = prompt;
+        input.focus();
+      });
+      prompts.append(button);
+    });
+    starter.append(title, copy, prompts);
+    answerNode.replaceChildren(starter);
+  }
+
   function renderConversation(next) {
     const conversation = next.conversation || {};
-    const status = (firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
+    const assistant = isRecord(next.assistant) ? next.assistant : {};
+    const status = (firstText(assistant, ["status", "state"]) || firstText(conversation, ["status", "state"]) || firstText(next, ["conversation_status"])).toUpperCase();
     const provider = agentProviderDisplay(next);
     const sourceLabel = erpEvidenceSourceLabel(next?.evidence_mode);
     const context = firstText(conversation, ["context_label", "context", "source_summary"]) || firstText(next, ["conversation_context"]) || sourceLabel;
     setText("ops-chat-provider", provider);
     setText("ops-chat-context", context);
     const answerNode = $("ops-chat-answer"); answerNode.classList.remove("is-error");
-    if (/UNAVAILABLE|ERROR|FAILED|DISABLED/.test(status)) {
+    const answer = assistantAnswer(assistant) || conversationAnswer(conversation);
+    if (answer && !asking) appendChatMessage("assistant", answer);
+    if (!chatTranscript.length) {
       voiceController?.setAnswer("");
-      answerNode.classList.add("is-error");
-      const message = cleanAnswer(firstText(conversation, ["error", "detail", "message"]) || firstText(next, ["conversation_message"])) || "Read-only conversation is unavailable from the current bridge.";
-      const paragraph = document.createElement("p"); paragraph.textContent = message; answerNode.replaceChildren(paragraph); return;
+      const unavailable = /UNAVAILABLE|ERROR|FAILED|DISABLED/.test(status);
+      if (unavailable) {
+        answerNode.classList.add("is-error");
+        const message = cleanAnswer(firstText(assistant, ["error", "detail", "message"]) || firstText(conversation, ["error", "detail", "message"]) || firstText(next, ["conversation_message"])) || "Agent is unavailable from the current source.";
+        const paragraph = document.createElement("p"); paragraph.textContent = message; answerNode.replaceChildren(paragraph);
+      } else renderChatStarter(answerNode);
+      return;
     }
-    const answer = conversationAnswer(conversation);
-    if (answer) { voiceController?.setAnswer(answer); renderMarkdownAnswer(answerNode, answer); return; }
-    voiceController?.setAnswer("");
-    const paragraph = document.createElement("p"); paragraph.className = "ops-empty"; paragraph.textContent = "Ask a read-only question about quantities, lots, customers, or delivery evidence."; answerNode.replaceChildren(paragraph);
+    const transcript = document.createElement("div"); transcript.className = "ops-chat-transcript";
+    let latestAssistant = "";
+    chatTranscript.forEach((message) => {
+      const bubble = document.createElement("article"); bubble.className = `ops-chat-message is-${message.role}`;
+      const label = document.createElement("span"); label.className = "ops-chat-message-label"; label.textContent = message.role === "user" ? "You" : "Agent";
+      const copy = document.createElement("div"); copy.className = "ops-chat-message-copy";
+      if (message.role === "user") {
+        const paragraph = document.createElement("p"); paragraph.textContent = message.content; copy.append(paragraph);
+      } else {
+        latestAssistant = message.content;
+        renderMarkdownAnswer(copy, message.content);
+      }
+      bubble.append(label, copy); transcript.append(bubble);
+    });
+    if (asking) {
+      const waiting = document.createElement("article"); waiting.className = "ops-chat-message is-assistant is-thinking";
+      const label = document.createElement("span"); label.className = "ops-chat-message-label"; label.textContent = "Agent";
+      const copy = document.createElement("p"); copy.textContent = "Checking the current operation…";
+      waiting.append(label, copy); transcript.append(waiting);
+    }
+    voiceController?.setAnswer(latestAssistant);
+    answerNode.replaceChildren(transcript);
+    answerNode.scrollTop = answerNode.scrollHeight;
+  }
+
+  function assistantPreparationMessage(preparation, missing, hasProposal) {
+    if (missing.length) return "";
+    const status = firstText(preparation, ["status", "state"]).toUpperCase();
+    if (status === "PHOTO_ANALYZED") return "Photo check is ready.";
+    if (status === "READY_FOR_CONFIRMATION") return hasProposal ? "" : "Review the prepared action before confirming it.";
+    if (status === "BLOCKED") return "Agent needs more information before it can prepare an action.";
+    if (status === "UNAVAILABLE") return "Agent is unavailable for this request.";
+    return "";
+  }
+
+  function assistantStatusLabel(status, preparation) {
+    const preparationStatus = firstText(preparation, ["status", "state"]).toUpperCase();
+    if (preparationStatus === "PHOTO_ANALYZED") return "Photo checked";
+    if (preparationStatus === "READY_FOR_CONFIRMATION") return "Ready to confirm";
+    if (preparationStatus === "BLOCKED") return "Needs input";
+    if (preparationStatus === "UNAVAILABLE" || status === "UNAVAILABLE") return "Unavailable";
+    return status === "BLOCKED" ? "Needs input" : "Agent update";
+  }
+
+  function renderAgentAssist(next) {
+    const panel = $("ops-agent-draft");
+    if (!panel) return;
+    const assistant = isRecord(next?.assistant) ? next.assistant : null;
+    const status = firstText(assistant, ["status", "state"]).toUpperCase();
+    const preparation = isRecord(assistant?.preparation) ? assistant.preparation : {};
+    const missing = Array.isArray(assistant?.missing_information)
+      ? assistant.missing_information.filter(isRecord)
+      : [];
+    const hasProposal = isRecord(next?.prepared_proposal);
+    const draft = hasProposal ? "" : assistantDraftText(assistant?.action_draft);
+    const reason = firstText(preparation, ["reason", "message", "detail"]);
+    const existingProposal = reason === "EXISTING_PREPARED_PROPOSAL";
+    const message = assistantPreparationMessage(preparation, missing, hasProposal);
+    if (!assistant || status === "NOT_REQUESTED" || existingProposal || (!missing.length && !draft && !message)) {
+      panel.hidden = true;
+      panel.replaceChildren();
+      return;
+    }
+    panel.hidden = false;
+    panel.replaceChildren();
+    const header = document.createElement("div"); header.className = "ops-agent-draft-header";
+    const label = document.createElement("span"); label.className = "object-label"; label.textContent = missing.length ? "What Agent needs" : draft ? "Suggested next step" : "Agent update";
+    const badge = document.createElement("span"); badge.className = `state-badge state-${statusTone(status || firstText(preparation, ["status", "state"]))}`; badge.textContent = assistantStatusLabel(status, preparation);
+    header.append(label, badge); panel.append(header);
+    if (draft) {
+      const value = document.createElement("p"); value.className = "ops-agent-draft-copy"; value.textContent = draft; panel.append(value);
+    }
+    if (message) {
+      const value = document.createElement("p"); value.className = "ops-agent-draft-copy"; value.textContent = message; panel.append(value);
+    }
+    if (missing.length) {
+      const list = document.createElement("ul"); list.className = "ops-agent-missing";
+      missing.forEach((item) => {
+        const prompt = firstText(item, ["prompt", "message", "detail"]);
+        if (!prompt) return;
+        const row = document.createElement("li"); row.textContent = prompt; list.append(row);
+      });
+      if (list.childNodes.length) panel.append(list);
+    }
   }
 
   function selectedTemplateFromProjection(next) {
@@ -3390,22 +3794,19 @@
     const applied = proposalStatus === "APPLIED";
     const recordedOutcome = Boolean(proposal && proposalStatus) && !confirmationPending && !applied;
     const retained = isRetainedEvidence(next?.evidence_mode);
-    const retainedLabel = recordedOutcome ? "Recorded event outcome" : "Recorded completion";
-    setText("ops-manager-gate-label", retained ? retainedLabel : "Manager gate");
-    setText("ops-evidence-title", recordedOutcome ? `Recorded event ${pretty(proposalStatus)}` : retained ? "Confirm recorded completion" : "Process evidence");
-    setText("ops-evidence-copy", recordedOutcome
-      ? `The recorded event outcome is ${pretty(proposalStatus || "unavailable")}; it cannot be confirmed as completed.`
-      : retained
-      ? "Review the recorded completion and confirm the exact retained case revision."
-      : "Prepare one bounded action from operator-declared evidence, then confirm the exact case revision.");
+    const event = isRecord(proposal?.event) ? proposal.event : {};
     setText("ops-gate-note", recordedOutcome
       ? "No confirmation or fresh native execution is available for this recorded outcome."
       : retained
       ? "Manager confirmation recovers a recorded completed event; it does not create a fresh native operation."
       : "Manager approval stays bounded to the prepared case revision.");
-    setText("ops-proposal-label", retained ? retainedLabel : "Manager approval");
-    setText("ops-proposal-title", recordedOutcome ? `Recorded event ${pretty(proposalStatus)}` : retained ? "Confirm recorded completion" : "Prepared same-case operation");
-    setText("ops-approve-label", recordedOutcome ? "Confirmation unavailable" : retained ? "Confirm recorded completion" : "Approve and execute");
+    setText("ops-proposal-label", recordedOutcome ? "Recorded event outcome" : retained ? "Recorded completion" : "Manager approval");
+    setText("ops-proposal-title", recordedOutcome
+      ? `Recorded event ${pretty(proposalStatus)}`
+      : retained
+        ? "Confirm recorded completion"
+        : `Confirm ${pretty(event.type || "action")}`);
+    setText("ops-approve-label", recordedOutcome ? "Confirmation unavailable" : "Confirm action");
     const readback = $("ops-approval-readback");
     const approval = approvalReadback(next);
     if (readback) {
@@ -3418,15 +3819,16 @@
     }
     panel.hidden = !proposal || text(proposal.status) === "APPLIED" || text(proposal.case_id) && text(proposal.case_id) !== text(next?.case_id);
     if (panel.hidden) return;
-    const event = isRecord(proposal.event) ? proposal.event : {};
-    const fields = Object.entries(event)
-      .filter(([key]) => !["event_id", "type", "occurred_at", "synthetic", "evidence_ref", "pick_evidence_ref"].includes(key))
-      .map(([key, value]) => `${pretty(key)}: ${Array.isArray(value) ? value.join(", ") : String(value)}`);
-    setText("ops-proposal-summary", [
-      `PO ${text(proposal.purchase_order) || text(next?.purchase_order) || "unavailable"}`,
-      pretty(event.type || "operation"),
-      ...fields,
-    ].join(" · "));
+    const customerOrder = firstText(event, ["customer_order", "sales_order", "order", "order_id"])
+      || firstText(proposal, ["customer_order", "sales_order", "order", "order_id"]);
+    const lot = firstText(event, ["lot", "lot_id", "batch", "batch_no"])
+      || firstText(proposal, ["lot", "lot_id", "batch", "batch_no"]);
+    const eventQuantity = numberFromKeys(event, ["quantity", "picked_quantity", "dispatch_quantity", "allocated_quantity"]);
+    const quantityLabel = finite(eventQuantity)
+      ? `${formatNumber(eventQuantity)} ${displayUnit(next?.quantities?.uom, "units")}`
+      : "";
+    const purchaseOrder = text(proposal.purchase_order) || purchaseOrderDisplay(next) || text(next?.purchase_order);
+    setText("ops-proposal-summary", [purchaseOrder, customerOrder, lot, quantityLabel].filter(Boolean).join(" · ") || "Exact action details are unavailable.");
     button.disabled = processingEvent || !confirmationPending || !next?.available || !sourceState?.hidden || !text($("ops-manager-id")?.value) || (!retained && !freshActionsAllowed(next));
   }
 
@@ -3561,10 +3963,10 @@
 
   function openEconomicFlow() {
     const url = new URL(window.location.href);
-    url.searchParams.set("view", "agent");
+    url.searchParams.set("view", "operations");
     url.hash = "ops-economic-panel";
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    setOpsView("agent", { scrollTarget: "ops-economic-panel" });
+    setOpsView("operations", { scrollTarget: "ops-economic-panel" });
   }
 
   function renderPhotoReviewCard(parent, next, attachment = null) {
@@ -3792,6 +4194,19 @@
     };
   }
 
+  function photoActionChips({ status, condition, nextAction, recommendation, current = true }) {
+    const chips = [];
+    if (status !== "COMPLETE") chips.push("Analysis unavailable");
+    if (condition === "visible_damage") chips.push("Damage flagged");
+    if (condition === "no_visible_damage") chips.push("No damage visible");
+    const action = nextAction.code || recommendation.code;
+    if (action === "REQUIRE_INSPECTION") chips.push("Needs inspection");
+    if (action === "VERIFY_IDENTITY") chips.push("Verify identity");
+    if (action === "RETAKE") chips.push("Retake photo");
+    if (!current) chips.push("Review required");
+    return [...new Set(chips)];
+  }
+
   function photoModelValue(value) {
     if (typeof value === "string") return text(value);
     return firstText(value, ["model_id", "model", "provider", "name"]);
@@ -3909,11 +4324,25 @@
       section.append(freshness);
     }
     const header = document.createElement("div"); header.className = "ops-photo-analysis-header";
-    const title = document.createElement("strong"); title.textContent = status === "COMPLETE" ? "Agent photo observation" : "Photo analysis unavailable";
+    const title = document.createElement("strong"); title.textContent = "Photo check";
     const badge = document.createElement("span");
     badge.className = `state-badge state-${status === "COMPLETE" ? "cyan" : status === "UNAVAILABLE" ? "coral" : "neutral"}`;
     badge.textContent = status ? pretty(status) : "Status unavailable";
     header.append(title, badge); section.append(header);
+    const chips = photoActionChips({
+      status,
+      condition,
+      nextAction,
+      recommendation,
+      current: analysis.advisory_current !== false,
+    });
+    if (chips.length) {
+      const chipRow = document.createElement("div"); chipRow.className = "ops-photo-action-chips";
+      chips.forEach((label) => {
+        const chip = document.createElement("span"); chip.textContent = label; chipRow.append(chip);
+      });
+      section.append(chipRow);
+    }
     const analysisPurpose = text(analysis.purpose).toLowerCase();
     if (analysisPurpose) {
       const purpose = document.createElement("p"); purpose.className = "ops-photo-analysis-purpose";
@@ -4157,10 +4586,83 @@
     return card;
   }
 
+  function placePhotoHistory(dashboard) {
+    const content = $("ops-photo-history-content");
+    const target = dashboard ? $("ops-photo-history-home") : $("ops-receiving-photo-history-slot");
+    if (content && target && content.parentElement !== target) target.append(content);
+    const history = $("ops-receiving-photo-history");
+    if (history) history.hidden = dashboard;
+  }
+
+  function receivingSummaryFact(label, value) {
+    const fact = document.createElement("div"); fact.className = "ops-receiving-fact";
+    const name = document.createElement("span"); name.textContent = label;
+    const detail = document.createElement("strong"); detail.textContent = value || "Unavailable";
+    fact.append(name, detail);
+    return fact;
+  }
+
+  function receivingItemCode(next, photo) {
+    const card = isRecord(next?.photo_review_card) ? next.photo_review_card : {};
+    const configured = isRecord(card.configured_item) ? card.configured_item : {};
+    const assessment = isRecord(photo?.analysis?.assessment) ? photo.analysis.assessment : {};
+    return firstText(next, ["item_code", "item", "sku"])
+      || firstText(configured, ["item_code", "code", "id"])
+      || firstText(assessment, ["item_code"]);
+  }
+
+  function renderReceivingSummary(next, photos = photoAttachmentList(next)) {
+    const panel = $("ops-receiving-summary");
+    if (!panel) return;
+    panel.replaceChildren();
+    const latest = latestPhoto(photos);
+    const photo = document.createElement("button");
+    photo.type = "button";
+    photo.className = "ops-receiving-photo";
+    photo.setAttribute("aria-label", latest ? "View receiving photo history" : "Add a receiving photo");
+    if (latest) {
+      const image = document.createElement("img");
+      image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(latest.attachment_id))}`;
+      image.alt = "Latest receiving photo";
+      image.loading = "lazy";
+      const copy = document.createElement("span"); copy.textContent = `${photos.length} photo${photos.length === 1 ? "" : "s"} attached`;
+      photo.append(image, copy);
+      photo.addEventListener("click", () => {
+        const history = $("ops-receiving-photo-history");
+        if (!history) return;
+        history.open = true;
+        history.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    } else {
+      const icon = document.createElement("i"); icon.className = "ph ph-camera"; icon.setAttribute("aria-hidden", "true");
+      const copy = document.createElement("span"); copy.textContent = "Add photo";
+      photo.append(icon, copy);
+      photo.addEventListener("click", () => $("ops-photo-file")?.click());
+    }
+    const lotNames = (Array.isArray(next?.lots) ? next.lots : [])
+      .filter(isRecord)
+      .map((lot) => photoLotIdentifier(lot))
+      .filter(Boolean);
+    const unit = displayUnit(next?.quantities?.uom, "units");
+    const received = quantity(next, "received");
+    const usable = quantity(next, "usable");
+    const quantityLabel = finite(received)
+      ? `${formatNumber(received)} ${unit} received${finite(usable) ? ` · ${formatNumber(usable)} usable` : ""}`
+      : "Quantity unavailable";
+    const facts = document.createElement("div"); facts.className = "ops-receiving-facts";
+    facts.append(
+      receivingSummaryFact("Item", receivingItemCode(next, latest) || "Item unavailable"),
+      receivingSummaryFact("Lot", lotNames.length ? lotNames.join(", ") : "No current lot supplied"),
+      receivingSummaryFact("Quantity", quantityLabel),
+    );
+    panel.append(photo, facts);
+  }
+
   function renderPhotos(next) {
+    const dashboard = document.body.dataset.opsView === "dashboard";
+    placePhotoHistory(dashboard);
     const list = $("ops-photos-list");
     if (!list) return;
-    const dashboard = document.body.dataset.opsView === "dashboard";
     setText("ops-photos-title", dashboard ? "Receiving check" : "Photo history");
     const historyToggle = $("ops-photo-history-toggle");
     if (historyToggle) historyToggle.setAttribute("aria-expanded", dashboard || document.querySelector("#ops-photos-panel.is-expanded") ? "true" : "false");
@@ -4172,6 +4674,7 @@
       renderPhotoReviewCard(reviewCard, next);
     }
     const photos = photoAttachmentList(next);
+    renderReceivingSummary(next, photos);
     setText("ops-photos-count", photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"}` : "No photos");
     if (!photos.length) {
       if (dashboard) { list.replaceChildren(renderPhotoDashboardEmpty()); return; }
@@ -4261,6 +4764,44 @@
     );
     return id;
   }
+
+  function setAgentUploadStatus(message, tone = "") {
+    const node = $("ops-agent-upload-status");
+    if (!node) return;
+    const value = text(message);
+    node.hidden = !value;
+    node.className = `ops-agent-upload-status${tone ? ` is-${tone}` : ""}`;
+    node.textContent = value;
+  }
+
+  function requestAgentPhotoUpload() {
+    if (!projection?.available || !freshActionsAllowed(projection)) {
+      setAgentUploadStatus("Photo upload is unavailable until the current case is ready.", "error");
+      return;
+    }
+    const input = $("ops-photo-file");
+    if (!input || input.disabled) {
+      setAgentUploadStatus("Photo upload is unavailable for the current case.", "error");
+      return;
+    }
+    agentUploadRequested = true;
+    setAgentUploadStatus("Choose one JPEG or PNG receiving photo.");
+    input.click();
+  }
+
+  async function uploadPhotoForAgent() {
+    try {
+      const attachmentId = await uploadSelectedPhoto();
+      if (!attachmentId) throw new Error("Photo could not be attached to this case.");
+      agentPhotoAttachmentId = attachmentId;
+      agentPhotoCaseId = text(projection?.case_id);
+      persistAgentPhoto(agentPhotoCaseId, attachmentId);
+      setAgentUploadStatus("Photo attached. It has not been analyzed; Agent will ask for a lot if needed.", "success");
+    } catch (error) {
+      setAgentUploadStatus(error.message || "Photo could not be attached to this case.", "error");
+    }
+  }
+
   async function analyzeSelectedPhoto() {
     if (photoAnalysisPending) return;
     const source = projection;
@@ -4486,12 +5027,30 @@
   }
 
   function renderProjection(value, { skipConversation = asking, resetEventFields = false } = {}) {
-    const normalized = normalizeProjection(value);
+    const base = normalizeProjection(value);
+    const previousCaseId = projection?.case_id;
+    const sourceCaseChanged = Boolean(previousCaseId && base.case_id && previousCaseId !== base.case_id);
+    const normalized = sourceCaseChanged ? base : hydrateConversation(base);
     const retained = retainConversationProjection(normalized, retainedConversation);
     const next = retained.projection;
     retainedConversation = retained.memory;
-    const previousCaseId = projection?.case_id;
     const caseChanged = Boolean(previousCaseId && next.case_id && previousCaseId !== next.case_id);
+    if (caseChanged) {
+      clearStoredConversation(previousCaseId);
+      clearStoredChatTranscript(previousCaseId);
+      clearStoredAgentPhoto(previousCaseId);
+      agentPhotoAttachmentId = "";
+      agentPhotoCaseId = "";
+    }
+    if (!agentPhotoAttachmentId && next.case_id) {
+      const retainedPhoto = storedAgentPhoto(next.case_id);
+      if (retainedPhoto) {
+        agentPhotoAttachmentId = retainedPhoto;
+        agentPhotoCaseId = next.case_id;
+      }
+    }
+    synchronizeChatTranscript(next, { caseChanged });
+    persistConversation(retainedConversation);
     syncPendingAllocationState(next, caseChanged);
     projection = next;
     if (next.available) {
@@ -4553,6 +5112,7 @@
     renderEvents(next);
     renderPhotos(next);
     renderPreparedProposal(next);
+    renderAgentAssist(next);
     if (!skipConversation) renderConversation(next);
     updateEventButton();
   }
@@ -4560,7 +5120,7 @@
   async function requestJSON(path, options = {}) {
     const method = text(options.method) ? text(options.method).toUpperCase() : "GET";
     const controller = method === "GET" && path === API_PATH && typeof AbortController === "function" ? new AbortController() : null;
-    const timeoutId = controller ? window.setTimeout(() => controller.abort(), 25000) : null;
+    const timeoutId = controller ? window.setTimeout(() => controller.abort(), 45000) : null;
     try {
       const response = await fetch(path, {
         headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -4568,7 +5128,7 @@
         ...(controller ? { signal: controller.signal } : {}),
       });
       const payload = await response.json().catch(() => {
-        if (controller?.signal.aborted) throw new Error("Order data is taking too long. Retry.");
+        if (controller?.signal.aborted) throw new Error("Order couldn’t load. Try again.");
         return {};
       });
       if (!response.ok) {
@@ -4577,7 +5137,7 @@
       }
       return payload;
     } catch (error) {
-      if (controller?.signal.aborted) throw new Error("Order data is taking too long. Retry.");
+      if (controller?.signal.aborted) throw new Error("Order couldn’t load. Try again.");
       throw error;
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
@@ -4649,7 +5209,16 @@
     }
   }
 
+  function foregroundOperationInFlight() {
+    return processingEvent
+      || preparingEconomic
+      || photoAnalysisPending
+      || asking
+      || pendingAllocationAction?.inFlight === true;
+  }
+
   async function refresh({ silent = false, periodic = false } = {}) {
+    if (periodic && foregroundOperationInFlight()) return null;
     if (loading) { if (!periodic) refreshQueued = true; return null; }
     loading = true;
     if (!projection) {
@@ -4668,6 +5237,7 @@
       renderProjection(next);
       return true;
     } catch (error) {
+      if (periodic && projection?.available && foregroundOperationInFlight()) return false;
       showSourceError(error);
       return false;
     } finally {
@@ -4741,6 +5311,8 @@
   $("ops-photo-analyze")?.addEventListener("click", () => { void analyzeSelectedPhoto(); });
   $("ops-photo-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0] || null;
+    const uploadForAgent = agentUploadRequested;
+    agentUploadRequested = false;
     const preservedLot = selectedPhotoLot;
     const supersedes = selectedPhotoSupersedesAttachmentId;
     resetSelectedPhoto({ clearInput: false });
@@ -4762,6 +5334,7 @@
     selectedPhoto = file; photoPreviewUrl = URL.createObjectURL(file);
     renderPhotoPreview(photoPreviewUrl, "Selected receiving photo; visible evidence only", `${file.name || "Photo selected"} · ready to attach or analyze.`);
     renderPhotoIntake(projection);
+    if (uploadForAgent) void uploadPhotoForAgent();
   });
   $("ops-manager-id")?.addEventListener("input", () => renderPreparedProposal(projection));
   $("ops-approve-proposal")?.addEventListener("click", async () => {
@@ -4801,10 +5374,21 @@
   $("ops-open-evidence-drawer")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
   $("ops-economic-compare")?.addEventListener("click", () => { void compareEconomicProposal(); });
   $("ops-economic-open-evidence")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
+  document.querySelectorAll("[data-ops-open-agent]").forEach((button) => {
+    button.addEventListener("click", (event) => openAgentDrawer(event.currentTarget));
+  });
+  $("ops-agent-upload")?.addEventListener("click", requestAgentPhotoUpload);
+  $("ops-agent-drawer-close")?.addEventListener("click", () => closeAgentDrawer());
+  $("ops-agent-drawer-backdrop")?.addEventListener("click", () => closeAgentDrawer());
   $("ops-evidence-drawer-close")?.addEventListener("click", closeEvidenceDrawer);
   $("ops-evidence-drawer-backdrop")?.addEventListener("click", closeEvidenceDrawer);
   $("ops-evidence-drawer-open-operations")?.addEventListener("click", openFullOperationsEvidence);
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("has-agent-drawer")) {
+      event.preventDefault();
+      closeAgentDrawer();
+      return;
+    }
     if (event.key === "Escape" && !$("ops-evidence-drawer")?.hidden) {
       event.preventDefault();
       closeEvidenceDrawer();
@@ -4831,27 +5415,33 @@
   bindCollapsiblePanel("ops-photos-panel", "ops-photo-history-toggle");
   function syncOpsViewFromLocation() {
     const target = text(window.location.hash).replace(/^#/, "");
-    setOpsView(requestedOpsView(), { scrollTarget: target });
+    setOpsView(requestedOpsView(), { scrollTarget: target, openAgent: requestedAgentDrawer() });
   }
   window.addEventListener("popstate", syncOpsViewFromLocation);
   window.addEventListener("hashchange", syncOpsViewFromLocation);
   syncOpsViewFromLocation();
   function initializeVoiceControls() {
+    const setVoiceStatus = (message, { initial = false } = {}) => {
+      const node = $("ops-voice-status");
+      if (!node) return;
+      node.textContent = text(message);
+      node.hidden = initial || !/permission|denied|unavailable|not supported/i.test(text(message));
+    };
     const recognitionConstructor = window.SpeechRecognition || window.webkitSpeechRecognition;
     voiceController = createVoiceController({
       recognitionFactory: recognitionConstructor ? () => new recognitionConstructor() : null,
       speechSynthesisApi: window.speechSynthesis,
       utteranceFactory: typeof window.SpeechSynthesisUtterance === "function" ? (answer) => new window.SpeechSynthesisUtterance(answer) : null,
       input: $("ops-question"),
-      setStatus: (message) => setText("ops-voice-status", message),
+      setStatus: (message) => setVoiceStatus(message),
       dictateButton: $("ops-dictate"),
       readButton: $("ops-read-answer"),
       stopButton: $("ops-stop-reading"),
     });
     const support = voiceController.support();
-    setText("ops-voice-status", support.dictation || support.reading
+    setVoiceStatus(support.dictation || support.reading
       ? "Optional English voice controls are ready. Dictation never sends automatically."
-      : "English voice controls are unavailable in this browser. Typing remains available.");
+      : "English voice controls are unavailable in this browser. Typing remains available.", { initial: true });
     $("ops-dictate")?.addEventListener("click", () => voiceController.toggleDictation());
     $("ops-read-answer")?.addEventListener("click", () => voiceController.readAnswer());
     $("ops-stop-reading")?.addEventListener("click", () => voiceController.stopReading());
@@ -4862,21 +5452,31 @@
   });
   async function requestAskQuestion(question) {
     clearAskValidation();
-    asking = true; $("ops-ask-submit").disabled = true; $("ops-ask-submit").textContent = "Asking…";
-    const answerNode = $("ops-chat-answer"); answerNode.classList.remove("is-error");
-    const waiting = document.createElement("p"); waiting.textContent = isRetainedEvidence(projection?.evidence_mode)
-      ? "Reading retained accepted evidence…"
-      : "Reading the current operation source…"; answerNode.replaceChildren(waiting);
+    appendChatMessage("user", question);
+    asking = true; $("ops-ask-submit").disabled = true; $("ops-ask-submit").textContent = "Thinking…";
+    if (projection) renderConversation(projection);
     try {
-      const response = await requestJSON(`${API_PATH}/ask`, { method: "POST", body: JSON.stringify({ question }) });
+      const request = { question };
+      if (agentPhotoAttachmentId && agentPhotoCaseId === text(projection?.case_id)) {
+        request.photo_attachment_id = agentPhotoAttachmentId;
+      }
+      const response = await requestJSON(`${API_PATH}/assist`, { method: "POST", body: JSON.stringify(request) });
       const next = unwrapProjection(response);
       if (next) renderProjection(next);
       const responseProjection = next || response;
+      const assistant = isRecord(responseProjection?.assistant)
+        ? responseProjection.assistant
+        : isRecord(response?.assistant) ? response.assistant : null;
       const responseConversation = Array.isArray(responseProjection.conversation)
         ? responseProjection.conversation
         : isRecord(responseProjection.conversation) ? responseProjection.conversation : {};
-      const answer = cleanAnswer(responseProjection.answer || responseProjection.answer_text || conversationAnswer(responseConversation));
+      const answer = assistantAnswer(assistant) || cleanAnswer(responseProjection.answer || responseProjection.answer_text || conversationAnswer(responseConversation));
+      if (answer) appendChatMessage("assistant", answer);
+      if (text(assistant?.preparation?.status).toUpperCase() === "PHOTO_ANALYZED") {
+        setAgentUploadStatus("Agent reviewed the attached photo.", "success");
+      }
       if (projection) {
+        if (assistant) projection.assistant = { ...assistant };
         if (Array.isArray(responseConversation) && responseConversation.length) {
           projection.conversation = responseConversation;
         } else if (isRecord(responseConversation) && Object.keys(responseConversation).length) {
@@ -4897,16 +5497,23 @@
         const retained = retainConversationProjection(projection, retainedConversation);
         projection = retained.projection;
         retainedConversation = retained.memory;
+        persistConversation(retainedConversation);
+        renderAgentAssist(projection);
         renderConversation(projection);
       }
       $("ops-question").value = "";
     } catch (error) {
-      answerNode.classList.add("is-error");
-      const message = error.message || "Read-only conversation is unavailable.";
-      const paragraph = document.createElement("p"); paragraph.textContent = message; answerNode.replaceChildren(paragraph);
+      const message = error.message || "Agent is unavailable from the current source.";
+      appendChatMessage("assistant", message);
       if (projection?.case_id) {
         const unavailable = {
           ...projection,
+          assistant: {
+            status: "UNAVAILABLE",
+            answer: message,
+            missing_information: [],
+            preparation: { status: "BLOCKED" },
+          },
           conversation: { status: "UNAVAILABLE", message },
           conversation_status: "UNAVAILABLE",
           conversation_message: message,
@@ -4914,9 +5521,11 @@
         const retained = retainConversationProjection(unavailable, retainedConversation);
         projection = retained.projection;
         retainedConversation = retained.memory;
+        persistConversation(retainedConversation);
       }
     } finally {
       asking = false; updateAskButton(); $("ops-ask-submit").innerHTML = '<i class="ph ph-chat-circle-dots" aria-hidden="true"></i>Ask';
+      if (projection) renderConversation(projection);
     }
   }
   $("ops-ask-form").addEventListener("submit", async (event) => {

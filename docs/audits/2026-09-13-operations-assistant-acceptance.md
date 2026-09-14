@@ -85,3 +85,27 @@ also caught stale-answer duplication during a new question and background refres
 timeouts overwriting the screen during a long approval. These were returned to
 the implementer along with the newly observed execution-state copy for correction.
 User visual review remains the final aesthetic acceptance.
+
+A separate live GET after confirmation returned HTTP 200 in 11.27 seconds and
+the same 20 dispatched / 5 held quantities. Current native documents reported
+Pick List Completed, Delivery Note To Bill, and Shipment Submitted. The legacy
+`view=agent` URL loaded the Operations layout and shared Agent successfully.
+Dashboard retained all eight historical weeks and reflected the new dispatch
+quantity; historical trends remain explicitly Demo history.
+
+Final browser checks of the frontend corrections:
+
+- A new explanation-only question showed its user message followed by Checking,
+  with no old answer appended to the new turn. The live answer then reported 20
+  dispatched and the remaining five-unit inspection step. Previously persisted
+  review messages were not rewritten.
+- At width 390, body and scroll width were both 390; the sidebar was hidden until
+  the one Operations Agent launcher opened the full-width drawer. Closing worked,
+  and the temporary viewport override was reset.
+- Completed Operations showed `20 dispatched · 5 held`, with execution evidence
+  behind View execution details. Old dispatch choices were no longer displayed as
+  next actions. Duplicate default photo-intake instructions were removed.
+- The refresh implementation now skips periodic reads during foreground work and
+  ignores a periodic-read failure when foreground work is already in progress.
+  The final live question completed without a source-error takeover. A second ERP
+  write was not performed solely to reproduce the long-approval timing condition.

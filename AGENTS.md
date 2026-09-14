@@ -15,6 +15,11 @@
 - Preserve meaningful values, honest concise estimate/conditional labels,
   actionable errors, explicit requested agent answers, and the order/lot/
   quantity needed to approve an action. Do not hide these with blanket CSS.
+- Every default Operations text must help an operator decide or take the next
+  action. Omit routine availability, source plumbing, voice-control explanations
+  and repeated status narration. Use compact actionable photo status chips with
+  evidence details on demand. Keep one Agent launcher where the sidebar is hidden;
+  a visible desktop Agent panel does not need repeated Ask Agent buttons.
 - Keep the approved visual composition and live backend behavior unchanged
   when simplifying copy. The user owns final visual review; no UI unit tests.
 - Slow initial reads must show a clear loading layout, not a blank workspace.
