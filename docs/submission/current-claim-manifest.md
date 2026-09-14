@@ -2,7 +2,19 @@
 
 The current recording candidate is the **25-part receiving exception**, reviewed September 14 UTC / September 13 Pacific. Older PO20/40-part and $42,000 billing evidence is historical and must not be joined into this case.
 
-## Current connected case
+## Latest fresh rehearsal
+
+The complete new-case path was exercised September 14 UTC / September 13 Pacific on the recording build: Chrome file upload → live agent-requested photo analysis → contextual eligibility answer → newly prepared action → one confirmation → native ERP readback. It passed **after an unnecessary lot clarification and one failed source read followed by recovery**, not on an uninterrupted first attempt.
+
+- Case: `M20-DIST-ECONOMIC-REHEARSAL-20260914`; PO `PUR-ORD-2026-00026`; SO `SAL-ORD-2026-00020`.
+- Before: 25 received, A20 eligible 20, B5 held 5, dispatched 0; no prepared proposal.
+- After: 20 dispatched, 5 held, carrier-confirmed 0.
+- Native results: Delivery Note `MAT-DN-2026-00025`, Pick List `STO-PICK-2026-00023`, Shipment `SHIPMENT-00023`.
+- Chrome native Delivery Note showed quantity 20 and status To Bill. Its USD 120 amount is a synthetic demo document value, not earned revenue or measured ROI.
+
+See [fresh rehearsal acceptance and defects](../audits/2026-09-14-fresh-rehearsal.md) and the [independently reviewed narration](../demo/voiceover-v4.md). This was an interactive rehearsal with screenshots, not a recorded video or finished film.
+
+## Retained completed preview / backup case
 
 - Case: `M20-DIST-ECONOMIC-REVIEW-20260913`.
 - Purchase order: `PUR-ORD-2026-00025`; customer order: `SAL-ORD-2026-00019`.
@@ -34,7 +46,7 @@ Primary proof: [contextual assistant / ERP acceptance](../audits/2026-09-13-oper
 
 PO25 is already in the completed partial-dispatch state. Do not click its old plan to pretend to create another shipment. A new before/after recording needs a new isolated case and its own evidence. Keep IDs consistent across the recording.
 
-The photo pipeline was verified by API attachment plus real image analysis. The browser file-chooser upload was not accepted in that run. This remains a recording preflight item; do not describe a preloaded image as a new upload.
+The old PO25 run verified API attachment plus real image analysis. The new PO26 rehearsal also accepted the actual Chrome file chooser and Agent Upload path. Both cases are now completed; a new before/after recording needs a separate isolated case. Never depict a preloaded photo as a fresh upload or replay a completed action.
 
 The workspace depends on private ERP/Bedrock credentials and matching case/runtime data. A clean clone and localhost alone are not judge access. The final public video and free test-access route remain separate release gates. No final Devpost submission is implied by these documents.
 

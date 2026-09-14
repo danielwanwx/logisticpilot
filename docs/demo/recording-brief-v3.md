@@ -1,6 +1,6 @@
 # LogisticPilot — recording brief v3
 
-Status: proposed main-film story and production plan, September 13 Pacific / September 14 UTC. This is not a recorded or rendered video. Baseline product revision: `d992345`. Read alongside [the current claims](../submission/current-claim-manifest.md) and [the five-minute script](five-minute-demo.md). Historical PO19/PO20 recording runbooks are not this film's instructions.
+Status: production plan updated after the fresh PO26 rehearsal, September 13 Pacific / September 14 UTC. This is not a recorded or rendered video. Baseline product revision: `d992345`. Use [voiceover v4](voiceover-v4.md) for current narration and timing; the v3 draft below is retained planning history. Read [fresh rehearsal results](../audits/2026-09-14-fresh-rehearsal.md) and [current claims](../submission/current-claim-manifest.md). Historical PO19/PO20 runbooks are not this film's instructions.
 
 ## The film's promise
 
@@ -17,12 +17,14 @@ Do not open with agent counts, a technology stack, a generic supply-chain dashbo
 | Scope | Evidence and decision |
 | --- | --- |
 | Current product/result walkthrough | Accepted goods selection, batch-aware Agent context, actual photo analysis, 20-unit execution records and signed-in Chrome ERP readback. Ready for rehearsal and result capture after a current preflight. |
-| Fresh before/after execution | Not yet accepted on this build. Prepare a separate case, demonstrate creation of a new exact-action proposal, then confirm and read back that same operation. PO25 cannot stand in for a pending case. |
-| Browser photo upload | API attachment and Bedrock analysis passed. Browser file chooser → upload → analysis is still a gate if the main film shows a new upload. |
+| Fresh before/after execution | Accepted on PO26 after one source-read failure and recovery: fresh agent-prepared action, one confirmation, native Delivery Note and current 20 dispatched / 5 held readback. PO26 is now completed and cannot be replayed as pending. |
+| Browser photo upload | Actual Chrome file chooser → Agent Upload → live photo analysis passed on PO26, with an unnecessary extra lot-confirmation turn recorded as a defect. |
 | Capture and Remotion | Story and responsibilities are defined here; no current Remotion composition, raw recording or exported final film has been verified. The root package currently has no Remotion dependency. |
 | Submission | Public playback and a free judge testing route still require validation. Localhost plus private credentials does not establish that route. |
 
 Independent reviewer reached the same distinction: plan/rehearse now; do not claim all paths or award readiness. Earlier 14/25 scoring was a pre-refactor assessment and must not be presented as a current re-score. Technical depth, demonstrated audience value and final presentation remain the differentiators; no supported winning probability exists.
+
+The subsequent rehearsal establishes that the main business path can complete on this build. It does not establish a frictionless take, raw video, final audio, Remotion render or public judge access. Record a new isolated instance for a new before/after take; preserve PO25 and PO26 as completed evidence. Do not redesign the UI for recording. Close ERP's Getting Started overlay and frame the native quantity/document clearly before capture.
 
 ## Before-state and after-state for the primary take
 
