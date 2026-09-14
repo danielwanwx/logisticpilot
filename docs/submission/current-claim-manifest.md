@@ -1,57 +1,65 @@
-# LogisticPilot — current claim manifest
+# LogisticPilot — current TAKE05 claim manifest
 
-The current recording candidate is the **25-part receiving exception**, reviewed September 14 UTC / September 13 Pacific. Older PO20/40-part and $42,000 billing evidence is historical and must not be joined into this case.
+## Current truth source
 
-## Latest fresh rehearsal
+This is the claim boundary for the current public entry: **TAKE05**, a synthetic
+POC receiving decision carried through live connected systems.
 
-The complete new-case path was exercised September 14 UTC / September 13 Pacific on the recording build: Chrome file upload → live agent-requested photo analysis → contextual eligibility answer → newly prepared action → one confirmation → native ERP readback. It passed **after an unnecessary lot clarification and one failed source read followed by recovery**, not on an uninterrupted first attempt.
+| Item | Current TAKE05 fact |
+| --- | --- |
+| Product | LogisticPilot, a receiving-decision agent for small distributors |
+| Case | `M20-DIST-ECONOMIC-TAKE05-20260914` |
+| Purchase order | `PUR-ORD-2026-00031` |
+| Sales order | `SAL-ORD-2026-00025` |
+| Before the approved operation | 25 received; LOT-A20: 20 usable and eligible; LOT-B5: 5 held for inspection; 0 dispatched |
+| Recorded live-POC result | 20 dispatched; 5 held; 0 missing; 0 delivery-confirmed |
+| Native ERPNext records | Delivery Note `MAT-DN-2026-00029`; Pick List `STO-PICK-2026-00027`; Shipment `SHIPMENT-00027` |
+| Cross-app readbacks | Airtable `recvLP8rGtUddx875`; Jira `QRC-10`; Slack via Celigo `1789421153.659629` |
 
-- Case: `M20-DIST-ECONOMIC-REHEARSAL-20260914`; PO `PUR-ORD-2026-00026`; SO `SAL-ORD-2026-00020`.
-- Before: 25 received, A20 eligible 20, B5 held 5, dispatched 0; no prepared proposal.
-- After: 20 dispatched, 5 held, carrier-confirmed 0.
-- Native results: Delivery Note `MAT-DN-2026-00025`, Pick List `STO-PICK-2026-00023`, Shipment `SHIPMENT-00023`.
-- Chrome native Delivery Note showed quantity 20 and status To Bill. Its USD 120 amount is a synthetic demo document value, not earned revenue or measured ROI.
+The final-film brief is [TAKE05-FINAL.md](video-v2/TAKE05-FINAL.md). The final file
+is
+`/Users/danielwan/Documents/LogisticPilot-media/logisticpilot-devpost-final-v1.mp4`.
+It received a final PASS from independent review and is approved for publishing: SHA256
+`9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`; 267.946 seconds;
+H.264 1920 × 1080 at 30 fps with AAC audio; successful full decode; and no sensitive
+leak or black interval. The off-camera approval-click limitation is disclosed and was
+non-blocking in the review.
 
-See [fresh rehearsal acceptance and defects](../audits/2026-09-14-fresh-rehearsal.md) and the [independently reviewed narration](../demo/voiceover-v4.md). This was an interactive rehearsal with screenshots, not a recorded video or finished film.
+## Supported and unsupported claims
 
-## Retained completed preview / backup case
-
-- Case: `M20-DIST-ECONOMIC-REVIEW-20260913`.
-- Purchase order: `PUR-ORD-2026-00025`; customer order: `SAL-ORD-2026-00019`.
-- Received: 25; LOT-A20 dispatched: 20; LOT-B5 held pending inspection: 5.
-- Native results: Delivery Note `MAT-DN-2026-00024`, Pick List `STO-PICK-2026-00022`, Shipment `SHIPMENT-00022`.
-- The manager-confirmed operation and a separate live GET agreed on these quantities. Delivery confirmed remains zero; this is not a carrier receipt.
-
-Primary proof: [contextual assistant / ERP acceptance](../audits/2026-09-13-operations-assistant-acceptance.md). Business packet: [economic POC inputs](../demo-data/economic-poc/README.md). Product review: [recording readiness research](../research/2026-09-14-recording-readiness-and-competition.md).
-
-## Claim boundaries
-
-| Capability | Supported statement | Unsupported statement |
+| Topic | Supported statement | Do not claim |
 | --- | --- | --- |
-| Real model | Strands with Bedrock Opus 4.6 handles contextual questions and actual photo analysis. | A scripted answer or replay is a new model call. |
-| Case evidence | The application reads ERP before supplying a bounded current case packet to the assistant. | Each assistant tool invocation independently queries every external system. |
-| Image input | The reader returns visible-condition observations and inspection recommendations; the operator supplies lot context. | The photograph counted hidden goods, measured diameter, proved identity or cleared stock. |
-| Quality | LOT-B5 remains held under receiving/inspection policy. | All five parts are defective, or the photo created a formal failed inspection. |
-| Action preparation | Supported drafts are constrained by current source, revision and evidence checks. | Conversation alone authorizes inventory writes. |
-| Execution | Browser confirmation applied an exact 20-unit demo ERP operation and read back its documents. | Goods physically arrived, postage was purchased, or revenue was earned. |
-| Business impact | 20 of 25 units progressed to recorded dispatch while five remained held. | 80% efficiency improvement, 20% defect rate, measured production ROI. |
-| Costs | Scenario compares $49.60 for two boxes with $24.80 for one, subject to declared fit and release conditions. | The selected split shipment saved $24.80; a carrier charged either amount. |
-| History | Eight illustrative weekly benchmark records are labeled Demo history. | These are measured customer improvements attributable to this agent. |
-| Harness | Structured decisions, scoped evidence, explicit confirmation and native readback run in the current path. | Current Graph/Swarm performance gains or all historical evals passing this flow. |
-| Multi-agent / evals | Separate dated historical experiments exist; installed Strands SDK was 1.53.0 at this review. | The current assistant is a multi-agent Graph, or Strands Evals runs here merely because it exists. |
-| Other apps | Earlier cases have their own Airtable/Jira/Slack/Celigo evidence. | Those integrations were freshly invoked for PO25. |
-| AgentCore | Separate historical Runtime proof exists. | This local Operations server is deployed through AgentCore. |
+| Receiving decision | LogisticPilot separates the 20 eligible LOT-A20 units from the 5 LOT-B5 units held for inspection, so the whole order need not wait for one uncertain lot. | That LOT-B5 is cleared, defective, or safe to dispatch. |
+| Photo input | The operator used Chrome's actual file-selection flow, and Amazon Nova Pro performed live visible-evidence analysis. | That the image counted hidden contents, measured dimensions, cleared quality, or identified the lot by itself. |
+| Agent reasoning | A Strands agent used direct Amazon Bedrock Claude Opus 4.6 for dialogue and contract reasoning. Its output is advisory. | That the model directly controlled quantities, gates, inventory writes, or record readback. |
+| Operational control | Deterministic application code owns quantities, eligibility and evidence gates, execution, and native readback. | That chat or a model response authorizes an ERP operation. |
+| Human approval | A human manager approval gated the live operation. The final edit shows the manager-ready state and a truthful runtime/readback confirmation cue. | That the confirmation click itself appears in the film; it is off-camera. |
+| ERP result | The live POC recorded 20 dispatched, 5 held, 0 missing, and 0 delivery-confirmed, with the listed Delivery Note, Pick List, and Shipment. | Physical shipment, carrier delivery, or customer receipt. |
+| Cross-app proof | The same case has visible readbacks in ERPNext, Airtable, Jira, and Slack via Celigo, using the identifiers above. | A generic dashboard, agent answer, or unrelated historical record proves those readbacks. |
+| Business value | The POC demonstrates a way to avoid holding an entire order for one uncertain lot and to reduce duplicate entry and reconciliation. | Measured time savings, production ROI, or a completed customer outcome. |
+| Postage scenario | The $24.80 difference is a conditional scenario estimate, subject to its stated fit and release conditions. | Realized savings, purchased postage, or a carrier charge. |
+| POC status | Purpose-built synthetic business records were executed through live connected systems. | Production deployment, physical shipment, delivery, earned revenue, or realized savings. |
+| Platform scope | Amazon Nova Pro is part of the current visible-evidence flow, and Slack via Celigo is the current handoff and readback route. | That AgentCore powers the current TAKE05 path. AgentCore remains separate historical proof. |
 
-## Recording and access
+## Recording and publication boundary
 
-PO25 is already in the completed partial-dispatch state. Do not click its old plan to pretend to create another shipment. A new before/after recording needs a new isolated case and its own evidence. Keep IDs consistent across the recording.
+- The final edit preserves the causal boundary: manager-ready review first, then a
+  concise runtime/readback confirmation cue, followed by native and cross-app
+  records. It does not show the approval click.
+- “Dispatched” means a recorded demo-system state. “Delivery-confirmed: 0” means the
+  film does not establish a completed delivery.
+- The independently reviewed final export is 267.946 seconds and under five minutes.
+  Its SHA256 identifies the exact PASS-reviewed MP4 for publication.
+- The connected tenant, credentials, and matching runtime journal are private. A
+  clean clone can run repository checks but cannot replay this live business event.
 
-The old PO25 run verified API attachment plus real image analysis. The new PO26 rehearsal also accepted the actual Chrome file chooser and Agent Upload path. Both cases are now completed; a new before/after recording needs a separate isolated case. Never depict a preloaded photo as a fresh upload or replay a completed action.
+## Historical evidence boundary
 
-The workspace depends on private ERP/Bedrock credentials and matching case/runtime data. A clean clone and localhost alone are not judge access. The final public video and free test-access route remain separate release gates. No final Devpost submission is implied by these documents.
+PO20 and the earlier PO25 and PO26 cases are retained historical evidence only. They
+must not be presented as the TAKE05 case, its approval, its photo upload, or its
+cross-app proof. Historical AgentCore, multi-agent, and integration experiments have
+their own dated records and do not establish the current path.
 
-## Historical evidence
-
-PO20: [retained recording review](video-v1/REHEARSAL-V2.md), [independent journal review](video-v1/SOL-REVIEW-V2.md). Historical multi-agent and provider trials retain their dated reports. Their successes and failures are not a current-case accuracy benchmark.
-
-Former name: The Missing 20. See [provenance](../provenance.md) and photo fixture attribution. All enterprise records are purpose-built demo data; third-party assets retain their licenses.
+The project was formerly called The Missing 20. Retained package names, audit paths,
+and older records use that name for traceability. All enterprise records are
+purpose-built POC data; third-party photo assets retain their recorded licenses.

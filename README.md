@@ -1,28 +1,48 @@
 # LogisticPilot
 
-**Current recording path (September 14 UTC):** the 25-part receiving exception,
-PO25 / SO19, real Strands/Bedrock analysis and verified ERP execution:
-**20 dispatched, 5 held**. Start with the [current claim manifest](docs/submission/current-claim-manifest.md),
-[recording plan](docs/demo/five-minute-demo.md),
-[current architecture](docs/architecture/current-recording.md), and
-[competition/product review](docs/research/2026-09-14-recording-readiness-and-competition.md).
-The connected workspace uses Dashboard and Operations with a shared Agent.
-The named PO20 and earlier billing results below are separate historical paths;
-their model, multi-agent, SaaS and architecture claims do not describe this run.
+## Current hackathon entry — TAKE05
 
-Economic baseline acceptance: [economic decision → ERP dispatch](docs/audits/2026-09-13-economic-poc-acceptance.md). An isolated 25-unit order now has a real Bedrock comparison and an approved 20-unit native ERP dispatch, with 5 units still held. The $24.80 postage difference is a conditional estimate, not realized savings.
+LogisticPilot is a receiving-decision agent for small distributors. The current
+public film is **TAKE05**, case `M20-DIST-ECONOMIC-TAKE05-20260914`, linking purchase
+order `PUR-ORD-2026-00031` to sales order `SAL-ORD-2026-00025`. Start with the
+[current claim manifest](docs/submission/current-claim-manifest.md), the
+[TAKE05 final-video brief](docs/submission/video-v2/TAKE05-FINAL.md), and
+[final-publication metadata](docs/submission/final-publication-metadata.md).
 
-Photo intake update: [live photo → cited decision → approved ERP dispatch](docs/audits/2026-09-13-photo-intake-live-acceptance.md). On isolated PO24 / SO18, real Opus identified visible carton damage; the economic agent cited that observation, and browser approval produced a 20-unit native ERP dispatch with 5 units still awaiting inspection. No B5 failure was entered. The public photograph is a labeled POC input, and the five-unit hold comes from receiving policy, not inferred carton contents. The audit preserves Nova's missed damage and the limited two-image comparison. This demo explicitly sets `MISSING20_OPERATIONS_PHOTO_MODEL_ID=us.anthropic.claude-opus-4-6-v1`; the default remains Nova Pro.
+The live POC begins with 25 received units: 20 usable and eligible in LOT-A20, and 5
+in LOT-B5 held for inspection. Its recorded result is **20 dispatched, 5 held, 0
+missing, and 0 delivery-confirmed**. Native ERPNext readback is Delivery Note
+`MAT-DN-2026-00029`, Pick List `STO-PICK-2026-00027`, and Shipment
+`SHIPMENT-00027`. The same TAKE05 case is read back in Airtable
+`recvLP8rGtUddx875`, Jira `QRC-10`, and Slack via Celigo `1789421153.659629`.
 
-Earlier release evidence: [PO20 claim manifest](docs/submission/current-claim-manifest.md) · [strict judge review](docs/audits/2026-09-13-award-readiness.md). Older invoice and multi-agent results remain separate cases.
+The operator selected a photo through Chrome's actual file picker, and Amazon Nova
+Pro analyzed its visible evidence. That analysis did not count hidden contents,
+measure dimensions, clear quality, or identify the lot. A Strands agent used direct
+Amazon Bedrock Claude Opus 4.6 for advisory dialogue and contract reasoning;
+deterministic application code owns quantities, evidence gates, execution, and
+readback. Human manager approval gated the live operation. The final edit shows the
+manager-ready state and a truthful runtime/readback confirmation cue, but the
+confirmation click is off-camera.
 
-> **September 13 current status:** The retained PO20 review and real Claude Opus
-> 4.6 application answers are verified in the isolated workspace. Historical ERP
-> evidence records 40 received / 40 dispatched, allocated A25/B15. See the
-> [September 12 runtime restoration audit](docs/audits/2026-09-12-runtime-restoration.md)
-> and [Opus access/application audit](docs/audits/2026-09-12-opus-restoration.md).
+TAKE05 uses synthetic POC business records in live connected systems. “Dispatched”
+is a recorded demo-system state, not a claim of physical shipment, delivery, revenue,
+or realized savings. The $24.80 postage difference is a conditional scenario
+estimate. The final MP4 received a final PASS from independent review and is approved
+for publishing:
+SHA256 `9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`,
+267.946 seconds, H.264 1920 × 1080 at 30 fps with AAC audio. The review confirmed a
+full decode with no sensitive leak or black interval; the off-camera click limitation
+is disclosed and non-blocking.
 
+## Historical repository context
 
+The sections below retain older The Missing 20 and PO20 material for provenance. They
+do not describe or prove the current TAKE05 path. Earlier PO20, PO25, PO26, AgentCore,
+multi-agent, billing, and architecture evidence remain historical unless a
+document explicitly identifies the TAKE05 case above.
+
+### Retained product framing and prior cases
 
 **An AI order desk for small distributors: resolve delivery exceptions, keep orders moving, and avoid unnecessary costs.**
 
@@ -45,7 +65,7 @@ not independent proof that customers physically received the parts. The PO is US
 customer orders are USD150 and USD90; no invoice, payment, or revenue-recognition
 claim is made.
 
-The new economic demonstration uses `LP-POC-COST-01`, mapped to isolated runtime
+The retained economic demonstration uses `LP-POC-COST-01`, mapped to isolated runtime
 case `M20-DIST-ECONOMIC-ECON-20260913`, PO23 and SO17. Its 25-unit synthetic order
 compares sending 20 qualified parts now and 5 later against waiting for all 25.
 Real Strands/Bedrock calls read contract, quality, rate and stock evidence; the
@@ -54,7 +74,7 @@ The verified result is 20 units recorded as dispatched in ERP and 5 held, with n
 carrier booking or payment. Consolidating all 25 remains advice only. See the
 [evidence packet](docs/demo-data/economic-poc/README.md) and acceptance audit.
 
-## Why this needs an agent
+### Historical investigation rationale
 
 For PO20, the agent explains inspection coverage and selects among supplied, versioned customer-contract options. Deterministic code computes feasible quantities and validates the selection. A held-out comparison against rules alone has not yet established the agent's incremental value.
 
@@ -75,10 +95,10 @@ The Strands loop performs that evidence work. Deterministic code—not the model
 state classification, action eligibility, approval binding, execution, verification,
 and replay safety.
 
-## Retained historical 20-unit evidence
+### Retained historical 20-unit evidence
 
 The following separately accepted September 7 case remains useful historical evidence;
-it is not connected to the current PO20 receiving path.
+it is not connected to the retained PO20 receiving path.
 
 1. **Detect** — an external demo-system change advances the source version and the
    ordered event ledger; the Dashboard never animates invented traffic.
@@ -96,23 +116,23 @@ it is not connected to the current PO20 receiving path.
    Celigo run receipt. Duplicate protection is covered separately by deterministic
    idempotency regression tests; this live capture does not claim a second replay attempt.
 
-## Architecture
+### Historical architecture
 
 ![LogisticPilot evidence and authority architecture](docs/architecture/logisticpilot-submission.png)
 
-The current recording architecture follows synthetic demo inputs—operator, scanner,
+The retained recording architecture follows synthetic demo inputs—operator, scanner,
 inspection, and carrier—through the Operations UI, the Python operation coordinator,
 the Strands contract selector, the deterministic evidence gate, and validated ERPNext
 actions. The recorded English Dashboard conversation uses Strands with direct Amazon
 Bedrock Claude Opus 4.6. The coordinator sends direct
 case updates to Airtable and Jira; Celigo carries the single-attempt Slack import.
 Connected-mode conversation can read fresh ERP facts and retained handoff journal evidence
-through an SDK session. Current review mode supplies a dated retained snapshot instead;
+through an SDK session. Historical review mode supplies a dated retained snapshot instead;
 both conversations remain read-only. AgentCore is historical evidence only.
 
 The model selects a versioned contract option and supplies evidence; deterministic
 application code owns quantity checks, authorization, inventory writes, and native
-readback. The architecture represents PO20: 40 ordered, received, and dispatched,
+readback. This historical architecture represents PO20: 40 ordered, received, and dispatched,
 allocated A25/B15 through shipments 16–19 of 20, 5, 13, and 2 parts. Delivery
 confirmations are explicitly synthetic demo inputs.
 
@@ -120,18 +140,18 @@ The earlier `docs/architecture/the-missing-20-live-architecture.english.jpg` rem
 available as a clearly labeled historical view and is not evidence for the current
 recording path.
 
-Explore the [interactive current architecture](docs/architecture/distributor-operations-recording.html),
+Explore the [interactive historical architecture](docs/architecture/distributor-operations-recording.html),
 read the [architecture specification](docs/architecture/distributor-operations-recording.json),
 or read the [as-built architecture](docs/architecture/as-built-architecture.md). The
-current local hero UI uses direct Strands Bedrock transport and does not pretend to
+historical local hero UI uses direct Strands Bedrock transport and does not pretend to
 route through AgentCore.
 
-The following connection table lists the connected systems and their evidence
-boundaries; the fresh-case audit is the authority for current record IDs and status.
+The following table lists systems used in retained historical paths. The TAKE05 claim
+manifest is the authority for current record IDs, systems, and status.
 
-## What is genuinely connected
+### Historical connected-systems evidence
 
-| System | Evidence or effect in the hero case | Authority |
+| System | Evidence or effect in retained historical cases | Authority |
 | --- | --- | --- |
 | ERPNext / Frappe Cloud | PO, receipt, lot, supplier invoice, customer order, delivery, sales invoice, Stock Ledger, GL | Fresh reads plus deterministic application writes after evidence checks |
 | Airtable | Exact-lot supplier-quality disposition and same-case case record | Deterministic application handoff and readback |
@@ -148,11 +168,11 @@ only after evidence checks and are followed by native readback.
 No production customer data, production accuracy, AgentCore Gateway/Policy, or causal
 revenue-uplift claim is presented.
 
-## Strands usage and historical investigation evidence
+### Historical Strands and investigation evidence
 
-Current PO20 contract selection and retained read-only conversation use Strands with
+Retained PO20 contract selection and historical read-only conversation use Strands with
 direct Bedrock Opus 4.6. The investigation/evaluator/trace capabilities below belong
-to separately demonstrated historical paths. The stopped current Graph experiment
+to separately demonstrated historical paths. The then-current Graph experiment
 does not establish a multi-agent improvement.
 
 The historical investigation implementation includes:
@@ -241,9 +261,9 @@ make workspace-smoke
 make judge-demo
 ```
 
-The credential-free `make check` gate is the repository quality check. Final video
-production and Devpost upload remain in progress; passing offline checks does not turn
-synthetic delivery confirmation into physical-receipt proof.
+The credential-free `make check` gate is the repository quality check. The current
+TAKE05 film received a final PASS for its exact SHA256-listed MP4; passing offline
+checks does not turn synthetic delivery confirmation into physical-receipt proof.
 
 Targeted proof:
 
@@ -256,7 +276,7 @@ Targeted proof:
 | Human/Agent dialogue matrix | [`artifacts/agent/2026-09-06-human-agent-dialogue-matrix-final-v2.json`](artifacts/agent/2026-09-06-human-agent-dialogue-matrix-final-v2.json) |
 | Manager-gated external ERPNext recovery | [`artifacts/audits/2026-09-07-current-hero-proof.json`](artifacts/audits/2026-09-07-current-hero-proof.json) + [hash-bound raw live capture](artifacts/audits/2026-09-07-current-hero-live-snapshot.json) |
 | AgentCore Runtime proof | [`artifacts/aws/2026-08-29-agentcore-runtime-proof.json`](artifacts/aws/2026-08-29-agentcore-runtime-proof.json) |
-| Final independent judge review | [`artifacts/audits/2026-09-07-role-judge-rerun/final-verification.md`](artifacts/audits/2026-09-07-role-judge-rerun/final-verification.md) |
+| Historical independent judge review | [`artifacts/audits/2026-09-07-role-judge-rerun/final-verification.md`](artifacts/audits/2026-09-07-role-judge-rerun/final-verification.md) |
 | Claim boundary | [`docs/submission/evidence-matrix.md`](docs/submission/evidence-matrix.md) |
 
 ## Failure behavior
@@ -299,6 +319,9 @@ See [known limitations](docs/submission/known-limitations.md) and
 
 ## Competition materials
 
+- [Current TAKE05 claim manifest](docs/submission/current-claim-manifest.md)
+- [TAKE05 final-video brief](docs/submission/video-v2/TAKE05-FINAL.md)
+- [Final-publication metadata](docs/submission/final-publication-metadata.md)
 - [Devpost submission draft](docs/submission/devpost-submission-draft.md)
 - [Five-minute demo script](docs/demo/five-minute-demo.md)
 - [Judging map](docs/submission/judging-map.md)
@@ -307,9 +330,9 @@ See [known limitations](docs/submission/known-limitations.md) and
 
 ## Built with
 
-Strands Agents SDK · Amazon Bedrock Claude Opus 4.6 · Amazon Bedrock AgentCore Runtime ·
-ERPNext/Frappe Cloud · Airtable · Celigo · Jira · Slack · Python 3.12 · Pydantic ·
-SQLite · Server-Sent Events · Vanilla JavaScript/CSS
+Strands Agents SDK · Amazon Bedrock · Amazon Nova Pro · Claude Opus 4.6 · Python ·
+SQLite · Server-Sent Events · ERPNext/Frappe Cloud · Airtable · Jira · Slack via
+Celigo
 
 ## License
 

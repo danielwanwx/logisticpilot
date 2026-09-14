@@ -1,174 +1,150 @@
-# Final publication metadata — LogisticPilot — The Missing 20
+# Final publication metadata — LogisticPilot TAKE05
 
-Status: **READY_FOR_FINAL_PUBLICATION_CONFIRMATION**. The final film independently
-passed review; it is not yet published, and the Devpost entry is not submitted.
+Status: **independent film/claims review PASS for the current badge-repaired export; public upload and judging-access checks remain open.**
+This file is the copy source for the public video and Devpost entry. It describes
+TAKE05 only; earlier PO20, PO25, and PO26 cases are historical evidence.
 
-This file is the final copy source for a public video and Devpost form. It reflects the
-completed PO20 same-case demo only. Historical PO18/PO19 records remain historical
-evidence and must not be used as the primary story.
+## Publication asset
 
-## Local publication assets
-
-Upload these repository-local JPEGs to Devpost after final preview:
-
-| Use | Exact local upload path |
-| --- | --- |
-| Devpost 3:2 hero | `docs/submission/media/logisticpilot-devpost-hero-3x2.jpg` |
-| Gallery: Dashboard | `docs/submission/media/logisticpilot-gallery-dashboard-3x2.jpg` |
-| Gallery: Agent conversation | `docs/submission/media/logisticpilot-gallery-agent-3x2.jpg` |
-| Gallery: Architecture | `docs/submission/media/logisticpilot-gallery-architecture-3x2.jpg` |
-
-Each JPEG is 1500 × 1000 pixels (3:2). The final normalized MP4 is a local artifact,
-not a repository asset and not yet a public video:
-
-`/Users/danielwan/Documents/Hackathon/Agents-for-Humans/the-missing-20-film/composition/renders/logisticpilot-final-proof-gap-fixed-264.1s.mp4`
-
-Independent review marked this file **PASS** with no material blockers: 264.20 seconds,
-1920 × 1080 at 30 fps, English-only audio, -16.0 LUFS, and -1.5 dBTP. See the
-[final film review](video-v1/SOL-FINAL-FILM-REVIEW.md). Upload or publish it only after
-the final publication confirmation in the checklist below.
+- Candidate video:
+  `/Users/danielwan/Documents/LogisticPilot-media/logisticpilot-devpost-final-v1.mp4`
+- Expected format: H.264, 1920 × 1080, 30 fps, AAC audio, under five minutes.
+- Verified current export: SHA256
+  `9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`; 267.946 seconds
+  (4:27.946); H.264, 1920 × 1080, 30 fps; AAC stereo; full-stream decode passed.
+- Independent film/claims review: **PASS**. No sensitive leak or black interval was
+  found. The known off-camera confirmation-click limitation is disclosed and
+  non-blocking. The audio result records stream metadata and successful decode; it does
+  not claim an audio-listening review.
+- Current film facts and review boundary:
+  [TAKE05-FINAL.md](video-v2/TAKE05-FINAL.md) and the
+  [current claim manifest](current-claim-manifest.md).
 
 ## YouTube metadata
 
 ### Title
 
-**LogisticPilot — Find the Missing 20 and Close the Fulfillment Loop**
+**LogisticPilot — A Receiving-Decision Agent for Small Distributors**
 
 ### Description
 
-When 40 parts arrive across several lots, a warehouse manager must reconcile a
-shortage, a sample quality failure, customer commitments, and records spread across
-ERPNext, Airtable, Jira, Slack, and Celigo. LogisticPilot makes that work reviewable:
-Strands and direct Amazon Bedrock Claude Opus 4.6 explain the evidence in English;
-deterministic application controls validate the plan; a manager approves the supported
-operation; and the application reads back the resulting business records.
+LogisticPilot helps a small distributor decide what can safely move when one
+receiving lot is uncertain. In this synthetic POC, case
+`M20-DIST-ECONOMIC-TAKE05-20260914` connects purchase order
+`PUR-ORD-2026-00031` to sales order `SAL-ORD-2026-00025`.
 
-This recorded demo follows isolated case `M20-DIST-COMPONENT-V2-20260910` on
-`PUR-ORD-2026-00020`. LOT-A20 records 20 parts. LOT-B18 records 18 of 20, including a
-two-part shortage and sample failure; a whole-lot retest resolves the hold. LOT-C2
-records the two-part replacement. Shipments 16–19 dispatch 20, 5, 13, and 2 parts to
-fulfill A25 and B15. Same-case Airtable, Jira, and Slack-via-Celigo readbacks are
-shown.
+The operator selects a receiving photo through Chrome. Amazon Nova Pro analyzes only
+visible evidence; it does not count hidden contents, measure dimensions, clear
+quality, or identify the lot. A Strands agent using direct Amazon Bedrock Claude Opus
+4.6 advises on the evidence and contract context. Deterministic application code owns
+quantity checks, gates, execution, and readback.
 
-All business inputs and delivery confirmations are synthetic demo records. They are
-not independent proof of physical receipt by a customer. The PO is USD160; customer
-orders are USD150 and USD90. The demo makes no invoice, payment, or revenue-recognition
-claim.
+The live POC starts with 25 received units: 20 eligible in LOT-A20 and 5 held in
+LOT-B5 for inspection. A human manager approval gates the 20-unit operation. The edit
+shows the manager-ready state and a truthful runtime/readback confirmation cue; the
+click itself is off-camera. The resulting records show 20 dispatched, 5 held, 0
+missing, and 0 delivery-confirmed: ERPNext Delivery Note `MAT-DN-2026-00029`, Pick
+List `STO-PICK-2026-00027`, Shipment `SHIPMENT-00027`; Airtable
+`recvLP8rGtUddx875`; Jira `QRC-10`; and Slack via Celigo `1789421153.659629`.
 
-Source code and documentation: https://github.com/danielwanwx/the-missing-20
+The business point is to avoid holding a whole order for one uncertain lot and to
+reduce duplicate entry and reconciliation. The $24.80 postage difference is a
+conditional scenario estimate, not realized savings. The POC uses synthetic business
+records in live connected systems; it makes no claim of physical shipment, completed
+delivery, earned revenue, or measured savings.
+
+Source code and current documentation:
+https://github.com/danielwanwx/logisticpilot
 
 ### Tags
 
-`LogisticPilot`, `The Missing 20`, `AI agents`, `Strands Agents SDK`, `Amazon Bedrock`,
-`Claude Opus 4.6`, `supply chain`, `warehouse operations`, `ERPNext`, `human in the loop`,
-`agentic workflow`, `fulfillment`
+`LogisticPilot`, `AI agents`, `receiving operations`, `small distributors`,
+`warehouse operations`, `Strands Agents SDK`, `Amazon Bedrock`, `Amazon Nova
+Pro`, `Claude Opus 4.6`, `ERPNext`, `Airtable`, `Jira`, `Slack`,
+`Celigo`, `human in the loop`, `supply chain`
 
 ## Devpost field map
 
-| Devpost field | Exact value or action |
+| Devpost field | Value or action |
 | --- | --- |
-| Project name | `LogisticPilot — The Missing 20` |
-| Tagline | `Find the gap. Prove the cause. Close the loop.` |
-| Track | `Professional Agents` |
-| Project description | Paste the reviewed copy from [`devpost-submission-draft.md`](devpost-submission-draft.md). |
-| Repository | `https://github.com/danielwanwx/the-missing-20` |
-| Video | The reviewed local film is ready for upload. Paste its verified public YouTube or Vimeo URL only after final publication confirmation. |
-| Live demo | Leave blank unless a stable, freely accessible demo is independently verified through the judging period. |
-| AWS Builder ID | Enter in Devpost only. Do not add an account email or Builder ID to the repository. |
-| Testing instructions | Paste the exact instructions below. |
-| Built with | Select or enter the tags listed below. |
+| Project name | `LogisticPilot` |
+| Tagline | `A receiving-decision agent that keeps eligible stock moving.` |
+| Track | `Professional Agents` — verify the selected track in the live form before submission. |
+| Project description | Paste the YouTube description above, or use its first three paragraphs for a shorter field. Preserve the claim boundary in the final paragraph. |
+| Repository | `https://github.com/danielwanwx/logisticpilot` |
+| Video | Upload the independently reviewed TAKE05 file, then paste the verified public video URL. |
+| Live demo | Leave blank unless a stable, freely accessible demo is independently verified for the full judging period. |
+| AWS Builder ID | Enter it only in Devpost. Do not add an account email or Builder ID to the repository. |
+| Testing instructions | Paste the instructions below. |
+| Built with | Select the tags below. |
 
-### Testing instructions
+## Testing instructions
 
-Clone the repository and run the credential-free quality gate:
+Run the repository quality gate from a clean checkout:
 
 ```bash
-git clone https://github.com/danielwanwx/the-missing-20.git
-cd the-missing-20
-cp .env.example .env
+git clone https://github.com/danielwanwx/logisticpilot.git
+cd logisticpilot
 make bootstrap
 make check
 ```
 
-For a local read-only product view, run `make case-console` and open
-`http://127.0.0.1:8765`. Startup and source inspection do not require cloud
-credentials. The recorded PO20 case uses a private isolated demo tenant and is not a
-public hosted test environment. Do not configure external credentials or replay its
-business events to evaluate the submission.
+The captured TAKE05 operation uses a private demo tenant, authorized Bedrock access,
+and a matching runtime journal. Those records are intentionally not in the clone, so
+the commands above do not replay a live ERP operation. For the reviewable public
+evidence boundary, read the README, the
+[current claim manifest](current-claim-manifest.md), and
+[TAKE05 final-video brief](video-v2/TAKE05-FINAL.md).
 
-Read the current case, evidence boundary, and architecture in the README and these
-repository records:
-
-- [`video-v1/REHEARSAL-V2.md`](video-v1/REHEARSAL-V2.md) for the scoped PO20 rehearsal.
-- [`video-v1/SOL-REVIEW-V2.md`](video-v1/SOL-REVIEW-V2.md) for the independent PO20
-  journal review.
-- [`../architecture/distributor-operations-recording.html`](../architecture/distributor-operations-recording.html)
-  for the interactive current architecture.
-
-The agent is advisory and read-only. A real Bedrock conversation requires an authorized
-AWS configuration; it must not be treated as a required public test step or as a path
-to operate the private demo tenant.
-
-### Built-with tags
+## Built with
 
 - Strands Agents SDK
 - Amazon Bedrock
+- Amazon Nova Pro
 - Claude Opus 4.6
-- Amazon Bedrock AgentCore Runtime (separately proven)
 - Python
-- Pydantic
 - SQLite
 - Server-Sent Events
-- Vanilla JavaScript
 - ERPNext / Frappe Cloud
 - Airtable
-- Celigo
 - Jira
 - Slack
-
-AgentCore Runtime is separately proven as a deployment and invocation boundary. Do not
-describe it as the current Dashboard execution path.
+- Celigo
 
 ## Final submission checklist
 
-### Video and public access
+### Video
 
-- [x] Export the final English video and verify it is five minutes or shorter.
-- [x] Independently review the exported video for readable case, lot, shipment,
-  approval, and source-readback details; the verdict is PASS with no material blockers.
-- [x] Verify the video uses the PO20 story only: `M20-DIST-COMPONENT-V2-20260910` /
-  `PUR-ORD-2026-00020`, 40 ordered/received/dispatched, and A25/B15 through
-  Shipments 16–19.
-- [x] Keep the photo language truthful: it is a manual attachment with no recognition,
-  count, QR, quality, or provenance extraction claim.
-- [x] State that delivery confirmations are synthetic and do not prove physical receipt.
-- [x] State the USD160 PO and USD150/USD90 customer-order values without claiming an
-  invoice, payment, or recognized revenue.
-- [ ] Upload the final video as public or unlisted according to the competition's
-  access rules, then verify it plays without creator login.
-- [ ] Paste the verified public video URL into Devpost.
+- [x] Verify the current badge-repaired MP4: SHA256
+  `9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`; 267.946 seconds;
+  H.264, 1920 × 1080, 30 fps; AAC stereo; and full-stream decode passed. This records
+  stream metadata and decode, without claiming an audio-listening review.
+- [x] Obtain and record an independent review of the current export. The
+  film/claims verdict is **PASS**, with no sensitive leak or black interval; the known
+  off-camera confirmation-click limitation is disclosed and non-blocking.
+- [x] Verify the visible story uses only TAKE05:
+  `M20-DIST-ECONOMIC-TAKE05-20260914` / `PUR-ORD-2026-00031` /
+  `SAL-ORD-2026-00025`.
+- [x] Verify the film shows the manager-ready state and readback cue without
+  suggesting the off-camera confirmation click is visible.
+- [x] Verify the photo language stays limited to actual Chrome selection and Nova
+  Pro's visible-evidence analysis.
+- [x] Verify “20 dispatched, 5 held, 0 missing, 0 delivery-confirmed” and all listed
+  native and cross-app identifiers are readable and consistent.
+- [x] Verify the impact copy makes no physical-shipment, delivery, revenue, realized
+  savings, or invented ROI claim.
+- [ ] Upload the reviewed video as public under the competition's access rules, and
+  verify public playback while signed out.
 
 ### Devpost and repository
 
-- [ ] Paste the current Devpost description and the exact field values above.
-- [ ] Confirm the title is `LogisticPilot — The Missing 20` and the tagline is
-  `Find the gap. Prove the cause. Close the loop.`
-- [ ] Confirm the Professional Agents track and Builder ID in the Devpost form.
-- [ ] Paste the testing instructions without exposing credentials or private runtime
-  paths.
-- [ ] Select the built-with tags above. Do not list Nova Pro. Do not imply that
-  AgentCore Runtime powers the current Dashboard.
-- [ ] Confirm the public repository, README, MIT license, current architecture links,
-  and video URL all open from a signed-out browser.
-- [ ] Run `make check` from a clean checkout and record the result for final review.
-- [ ] Use Devpost preview to confirm English copy, links, video embed, and attachments.
-- [ ] Complete the entrant attestations and submit only after the final preview passes.
-
-### Claims to preserve
-
-- [ ] The recorded English Dashboard conversation uses Strands with direct Amazon
-  Bedrock Claude Opus 4.6 and remains advisory/read-only.
-- [ ] Deterministic application code validates quantities and evidence, and an explicit
-  manager approval gates a supported operation.
-- [ ] Airtable, Jira, and Slack-via-Celigo readbacks belong to the same PO20 case.
-- [ ] Historical cases stay labeled historical and are not presented as PO20 evidence.
+- [ ] Paste the current project description, repository URL, tags, and testing
+  instructions into Devpost.
+- [ ] Confirm the final title and selected competition track in the live form.
+- [ ] Add the verified public video URL.
+- [ ] Select every Built with tag above, including Amazon Nova Pro.
+- [ ] Confirm that README, claim-manifest, TAKE05 brief, repository URL, and video
+  URL open from a signed-out browser.
+- [ ] Use Devpost preview to check English copy, links, video embed, and attachments.
+- [ ] Complete entrant attestations and submit only after the current independent
+  review and final preview pass.

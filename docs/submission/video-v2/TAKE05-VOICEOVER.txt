@@ -1,0 +1,25 @@
+Here is a real receiving decision, not a dashboard tour. A small distributor receives twenty-five components for a customer order. Five might be damaged. If the team holds everything, a good order waits. If they release everything, they risk shipping the wrong parts.
+
+The receiver takes one receiving photo and uploads it to LogisticPilot. Amazon Nova Pro reads the visible evidence and describes what needs inspection. It does not decide quality. The photo becomes an evidence packet for the agent and for the person responsible for the release.
+
+The Strands agent brings together the photo observation, the ERP lot, the sales order, and the receiving record. It separates the two lots instead of treating this as one all-or-nothing exception. Twenty units in LOT-A20 are available. Five units in LOT-B5 stay held for inspection.
+
+Now the agent tests the business consequence. It checks the purchase order, the customer order, allocation, and available inventory. Its recommendation is simple: protect the five questionable units, but keep the twenty verified units moving. That avoids turning one local exception into a delayed customer order.
+
+The agent also turns the finding into an executable plan. It proposes the release quantity, the held quantity, and the follow-up work. It shows its tool trace and its sources, so the recommendation is reviewable rather than a black box. The model advises. The operational records remain the source of truth.
+
+This is the control point. The agent cannot release inventory by itself. A manager reviews the evidence packet and the proposed action. After the manager confirms, the workflow records twenty units for dispatch and keeps five units held. The decision is narrow, reversible, and tied to the exact lots and order.
+
+The applied result is twenty dispatched, five held, and zero missing. The point is not to make a dramatic prediction. The point is to reduce the time between a physical exception and a safe, specific operational decision.
+
+First, the ERP shows the native delivery record: MAT-DN-2026-00029. Twenty units are recorded against the order. This is where fulfillment owns the execution record.
+
+Then the same take is visible in Airtable: twenty-five received, five held, zero missing, and twenty dispatched. The agent did not ask a person to retype the summary into a separate tracker.
+
+In Jira, QRC-10 carries the quality follow-up with the matching quantities and the same case reference. The exception is no longer stranded in a chat or in someone’s memory.
+
+And Slack receives the matching operational update. Warehouse, customer service, and the manager see one consistent status without a second handoff or a second reconciliation.
+
+This is the economic value we are aiming for: do not hold a whole order when only one lot is uncertain; reduce duplicate entry and reconciliation across tools; and lower the risk that a questionable lot leaves with a good one. We do not invent a dollar saving in this proof. We show the evidence chain that a small team can verify.
+
+LogisticPilot is a receiving-decision agent for small distributors. It starts with physical evidence, reasons across the systems the team already uses, asks for human approval, and verifies the resulting records. Agent recommends. Human approves. Systems execute.
