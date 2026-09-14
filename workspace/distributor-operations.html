@@ -8,15 +8,15 @@
     <link rel="stylesheet" href="/assets/phosphor-regular.css" />
     <link rel="stylesheet" href="/assets/phosphor-bold.css" />
     <link rel="stylesheet" href="/style.css?v=source-driven-final-v32" />
-    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-economic-ui-v5" />
+    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-economic-ui-v7" />
     <title>LogisticPilot</title>
   </head>
   <body class="operations-shell" data-operations-state="loading" data-ops-view="dashboard">
     <a class="skip-link" href="#main-content">Skip to operations</a>
 
     <div class="ops-monitoring-bar" aria-label="Evidence source status">
-      <span><span class="ops-monitoring-dot" aria-hidden="true"></span><strong>Evidence-led operations</strong></span>
-      <span id="ops-evidence-retention" class="ops-top-evidence" aria-live="polite">Evidence source loading</span>
+      <span><span class="ops-monitoring-dot" aria-hidden="true"></span><strong>Order workspace</strong></span>
+      <span id="ops-evidence-retention" class="ops-top-evidence" aria-live="polite">Syncing</span>
     </div>
 
     <header class="topbar ops-topbar">
@@ -42,18 +42,19 @@
     <main id="main-content" class="operations-page" tabindex="-1">
       <section class="ops-hero" aria-labelledby="ops-title">
         <div>
-          <span id="ops-hero-context" class="object-label">Evidence-led order operations</span>
-          <h1 id="ops-title">Evidence-led order operations</h1>
-          <p id="ops-hero-copy" class="ops-hero-copy">The source projection supplies each quantity, commitment, and delivery state.</p>
+          <span id="ops-hero-context" class="object-label">Overview</span>
+          <h1 id="ops-title">Current order status</h1>
+          <p id="ops-hero-copy" class="ops-hero-copy">Current order status</p>
         </div>
-        <div class="ops-hero-mark" aria-label="Current case status"><strong id="ops-hero-case">Case loading</strong><span id="ops-hero-state">Evidence status pending</span></div>
+        <div class="ops-hero-mark"><a id="ops-hero-investigate" class="ops-hero-action" data-ops-view-link="agent" href="/operations?view=agent#ops-overview">Investigate this order <i class="ph ph-arrow-up-right" aria-hidden="true"></i></a><span id="ops-hero-case" class="sr-only">Case loading</span><span id="ops-hero-state" class="sr-only">Evidence status pending</span></div>
       </section>
 
       <aside class="ops-case-card ops-status-strip" aria-label="Current incident evidence">
-        <div class="ops-status-case"><span class="object-label">Incident ribbon</span><strong id="ops-case-label">Loading operation</strong></div>
-        <span id="ops-case-id" class="ops-mono">Waiting for the source</span>
-        <span id="ops-case-po" class="ops-mono">Purchase order unavailable</span>
-        <span id="ops-refresh-state" class="ops-mono ops-evidence-status" aria-live="polite">No successful source refresh yet</span>
+        <div class="ops-status-case"><span class="object-label">Monitoring</span><strong id="ops-case-label">PO unavailable</strong></div>
+        <span id="ops-case-id" class="ops-mono" hidden>Waiting for the source</span>
+        <span id="ops-case-po" class="ops-mono" hidden>Purchase order unavailable</span>
+        <span id="ops-refresh-state" class="ops-mono ops-evidence-status" aria-live="polite">Syncing</span>
+        <a id="ops-status-investigate" class="ops-status-action" data-ops-view-link="agent" href="/operations?view=agent#ops-overview">Investigate <i class="ph ph-arrow-up-right" aria-hidden="true"></i></a>
       </aside>
 
       <div id="ops-source-state" class="ops-source-state" role="status" hidden>
@@ -79,9 +80,9 @@
               <article class="ops-quantity-card" data-quantity-card="cartons"><span>Cartons</span><strong id="ops-quantity-cartons">Unknown</strong><small>outer packages</small></article>
               <article class="ops-quantity-card" data-quantity-card="ordered"><span>Ordered</span><strong id="ops-quantity-ordered">Unknown</strong><small id="ops-quantity-ordered-unit">units</small></article>
               <article class="ops-quantity-card" data-quantity-card="received"><span>Received</span><strong id="ops-quantity-received">Unknown</strong><small id="ops-quantity-received-unit">units</small></article>
-              <article class="ops-quantity-card" data-quantity-card="usable"><span>Usable</span><strong id="ops-quantity-usable">Unknown</strong><small id="ops-quantity-usable-unit">units</small></article>
+              <article class="ops-quantity-card" data-quantity-card="usable"><span>Cleared</span><strong id="ops-quantity-usable">Unknown</strong><small id="ops-quantity-usable-unit">units</small></article>
               <article class="ops-quantity-card" data-quantity-card="held"><span>Held</span><strong id="ops-quantity-held">Unknown</strong><small id="ops-quantity-held-unit">units</small></article>
-              <article class="ops-quantity-card" data-quantity-card="missing"><span>Missing</span><strong id="ops-quantity-missing">Unknown</strong><small id="ops-quantity-missing-unit">units</small></article>
+              <article class="ops-quantity-card" data-quantity-card="missing"><span>Gap</span><strong id="ops-quantity-missing">Unknown</strong><small id="ops-quantity-missing-unit">units</small></article>
               <article class="ops-quantity-card" data-quantity-card="allocated"><span id="ops-quantity-allocated-label">Allocated</span><strong id="ops-quantity-allocated">Unknown</strong><small id="ops-quantity-allocated-unit">units</small></article>
               <article class="ops-quantity-card" data-quantity-card="dispatched"><span>Dispatched</span><strong id="ops-quantity-dispatched">Unknown</strong><small id="ops-quantity-dispatched-unit">units</small></article>
               <article class="ops-quantity-card" data-quantity-card="delivery_confirmed"><span id="ops-quantity-delivery-confirmed-label">Delivery confirmation</span><strong id="ops-quantity-delivery_confirmed">Unknown</strong><small id="ops-quantity-delivery_confirmed-unit">explicit event</small></article>
@@ -95,33 +96,36 @@
           </section>
 
           <section id="ops-activity-panel" class="ops-panel ops-events-panel" aria-labelledby="ops-activity-title">
-            <header class="ops-panel-header"><div><span class="object-label">Recent events</span><h2 id="ops-activity-title">Evidence handoffs</h2></div><span class="ops-count-label" id="ops-events-count">Unknown</span></header>
+            <header class="ops-panel-header"><div><span class="object-label">Recent activity</span><h2 id="ops-activity-title">Recent events</h2></div><span class="ops-count-label" id="ops-events-count">Unknown</span></header>
             <ol id="ops-events-list" class="ops-activity-list" aria-live="polite"></ol>
           </section>
 
           <section id="ops-photos-panel" class="ops-panel ops-photos-panel" aria-labelledby="ops-photos-title">
-            <header class="ops-panel-header"><div><span class="object-label">Photo intake</span><h2 id="ops-photos-title">Receiving photos</h2></div><div class="ops-photo-header-actions"><a class="ops-photo-intake-link" data-ops-view-link="operations" href="/operations?view=operations#ops-photo-intake">Check incoming photo</a><button id="ops-open-evidence-drawer" class="ops-icon-button" type="button" aria-label="Open evidence details" aria-haspopup="dialog" aria-expanded="false"><i class="ph ph-arrows-out" aria-hidden="true"></i></button></div></header>
-            <p class="ops-panel-copy">Review source-backed photos and any explicit model observation. Photo output describes visible evidence only; it never updates stock.</p>
-            <div id="ops-photos-list" class="ops-photos-list" aria-live="polite"></div>
-            <span id="ops-photos-count" class="sr-only">No photos</span>
+            <header id="ops-photo-history-toggle" class="ops-panel-header" role="button" tabindex="0" aria-expanded="false"><div><span class="object-label">Photo intake</span><h2 id="ops-photos-title">Receiving check</h2></div><div class="ops-photo-header-actions"><a class="ops-photo-intake-link" data-ops-view-link="operations" href="/operations?view=operations#ops-photo-intake">Check incoming photo</a><button id="ops-open-evidence-drawer" class="ops-icon-button" type="button" aria-label="Open evidence details" aria-haspopup="dialog" aria-expanded="false"><i class="ph ph-arrows-out" aria-hidden="true"></i></button></div></header>
+            <div id="ops-photo-history-content">
+              <div id="ops-photo-review-card" class="ops-photo-review-card" aria-live="polite" hidden></div>
+              <div id="ops-photos-list" class="ops-photos-list" aria-live="polite"></div>
+              <span id="ops-photos-count" class="sr-only">No photos</span>
+            </div>
           </section>
 
           <aside id="ops-order-value-card" class="ops-order-value-card" aria-labelledby="ops-order-value-title">
-            <span class="object-label">Source order value</span><h2 id="ops-order-value-title">Purchase order position</h2>
+            <span class="object-label">Business impact</span><h2 id="ops-order-value-title">Order value</h2>
             <strong id="ops-order-value">Unavailable</strong><span id="ops-order-value-label">Purchase order line amount unavailable</span>
-            <div class="ops-order-value-facts"><div><strong id="ops-order-dispatch">Unknown</strong><span>Dispatch recorded</span></div><div><strong id="ops-order-allocations">Unknown</strong><span>Remaining allocated stock</span></div></div>
+            <div class="ops-order-value-facts"><div><strong id="ops-order-dispatch">Unknown</strong><span>Dispatch recorded</span></div><div><strong id="ops-order-allocations">Unknown</strong><span>Allocated</span></div></div>
+            <a id="ops-order-value-investigate" class="ops-impact-action" data-ops-view-link="agent" href="/operations?view=agent#ops-economic-panel">Review dispatch options <i class="ph ph-arrow-up-right" aria-hidden="true"></i></a>
             <p id="ops-order-value-note">Amounts and delivery state appear only when supplied by the accepted source.</p>
           </aside>
 
           <section id="ops-overview" class="ops-panel ops-overview" aria-labelledby="ops-overview-title">
-            <header class="ops-panel-header"><div><span class="object-label">Investigation</span><h2 id="ops-overview-title">Cross-system evidence</h2></div><span id="ops-overview-case" class="ops-mono">Loading case</span></header>
+            <header class="ops-panel-header"><div><span class="object-label">Investigation</span><h2 id="ops-overview-title">Cross-system evidence</h2></div><details class="ops-overview-record"><summary>Case details</summary><span id="ops-overview-case" class="ops-mono">Loading case</span></details></header>
             <p id="ops-overview-copy" class="ops-panel-copy">Same-case records into the Investigation view and manager gate.</p>
             <div id="ops-overview-graph" class="ops-overview-graph" aria-label="Cross-system operation graph"></div>
             <div class="ops-overview-links"><a id="ops-alert-focus-link" href="#ops-alerts-panel">Focus active alert</a><a href="#ops-chat-panel">Ask the read-only agent</a><a href="#ops-evidence-panel">Review manager gate</a></div>
           </section>
 
           <section id="ops-economic-panel" class="ops-panel ops-economic-panel" aria-labelledby="ops-economic-title" hidden>
-            <header class="ops-panel-header ops-economic-header">
+            <header id="ops-economic-toggle" class="ops-panel-header ops-economic-header" role="button" tabindex="0" aria-expanded="false">
               <div>
                 <span class="object-label">Economic decision</span>
                 <h2 id="ops-economic-title">Keep the order moving</h2>
@@ -129,7 +133,6 @@
               </div>
               <div class="ops-economic-badges">
                 <span id="ops-economic-status" class="state-badge state-neutral">Status unavailable</span>
-                <span class="ops-synthetic-badge"><i class="ph ph-flask" aria-hidden="true"></i>Synthetic POC</span>
                 <span class="ops-synthetic-badge"><i class="ph ph-receipt" aria-hidden="true"></i>Postage estimate</span>
               </div>
             </header>
@@ -149,7 +152,7 @@
               <p id="ops-economic-model-decision" class="ops-economic-model-decision">Decision unavailable from the source.</p>
               <p id="ops-economic-model-note" class="ops-economic-model-note" hidden></p>
               <div id="ops-economic-model-citations" class="ops-economic-citations" aria-label="Model citations"></div>
-              <details id="ops-economic-model-trace" class="ops-economic-trace" hidden><summary>View evidence reads</summary><pre id="ops-economic-model-trace-value"></pre></details>
+              <details id="ops-economic-model-trace" class="ops-economic-trace" hidden><summary>View evidence reads</summary><span class="ops-synthetic-badge"><i class="ph ph-flask" aria-hidden="true"></i>Synthetic POC</span><pre id="ops-economic-model-trace-value"></pre></details>
             </section>
             <section class="ops-economic-gate" aria-labelledby="ops-economic-gate-title">
               <div class="ops-economic-subheader"><span id="ops-economic-gate-title" class="object-label">Dispatch checks</span><span id="ops-economic-gate-status" class="state-badge state-neutral">Status unavailable</span></div>
@@ -162,9 +165,12 @@
               <div><span class="object-label">Investigation</span><h2 id="ops-chat-title">Ask the agent</h2></div>
               <div class="ops-chat-context"><span id="ops-chat-provider" class="state-badge state-neutral">Provider —</span><span id="ops-chat-context" class="ops-count-label">Accepted evidence</span></div>
             </header>
-            <div id="ops-agent-tools" class="ops-agent-tools" aria-label="Agent evidence tools"></div>
-            <p id="ops-agent-tools-note" class="ops-agent-tools-note">Capability names describe what the read-only workflow can use. They are not an executed tool trace.</p>
-            <div id="ops-agent-activity" class="ops-agent-activity" aria-live="polite"><span class="object-label">Source activity</span><span id="ops-agent-activity-copy">Waiting for source events.</span></div>
+            <details id="ops-chat-activity-details" class="ops-chat-activity-details"><summary>Activity &amp; sources</summary>
+              <div id="ops-agent-tools" class="ops-agent-tools" aria-label="Agent evidence tools"></div>
+              <p id="ops-agent-tools-note" class="ops-agent-tools-note">Capability names describe what the read-only workflow can use. They are not an executed tool trace.</p>
+              <div id="ops-agent-activity" class="ops-agent-activity" aria-live="polite"><span class="object-label">Source activity</span><span id="ops-agent-activity-copy">Waiting for source events.</span></div>
+              <p class="ops-chat-note">Read-only conversation. Dictation only fills the question for your review; it never sends automatically. Each answer reflects the evidence available when you asked.</p>
+            </details>
             <div id="ops-chat-answer" class="ops-chat-answer" aria-live="polite"><p class="ops-empty">Ask a read-only question about quantities, lots, customers, or delivery evidence.</p></div>
             <form id="ops-ask-form" class="ops-ask-form" novalidate>
               <label class="sr-only" for="ops-question">Ask about this operation</label>
@@ -177,25 +183,27 @@
               <button id="ops-stop-reading" class="button button-quiet" type="button" hidden><i class="ph ph-stop-circle" aria-hidden="true"></i>Stop reading</button>
               <span id="ops-voice-status" class="ops-voice-status" role="status" aria-live="polite">Voice controls are optional. Typing remains available.</span>
             </div>
-            <p class="ops-chat-note">Read-only conversation. Dictation only fills the question for your review; it never sends automatically. Each answer reflects the evidence available when you asked.</p>
             <a class="ops-open-agent" data-ops-view-link="agent" href="/operations?view=agent">Open Agent board</a>
           </section>
 
           <section id="ops-evidence-panel" class="ops-panel ops-evidence-panel" aria-labelledby="ops-evidence-title">
             <header class="ops-panel-header">
               <div><span id="ops-manager-gate-label" class="object-label">Manager gate</span><h2 id="ops-evidence-title">Process evidence</h2></div>
-              <span class="ops-synthetic-badge"><i class="ph ph-flask" aria-hidden="true"></i>Simulated scanner / inspection / carrier evidence</span>
             </header>
-            <p id="ops-evidence-copy" class="ops-panel-copy">Prepare one bounded action from operator-declared evidence, then confirm the exact case revision.</p>
+            <p id="ops-evidence-copy" class="ops-panel-copy">Capture a receiving check, then confirm the exact action.</p>
+            <details id="ops-evidence-context-details" class="ops-evidence-context-details"><summary>Evidence context</summary><span class="ops-synthetic-badge"><i class="ph ph-flask" aria-hidden="true"></i>Simulated scanner / inspection / carrier evidence</span></details>
             <form id="ops-event-form" class="ops-operator-form" novalidate>
               <div class="ops-photo-input" id="ops-photo-intake">
-                <div class="ops-photo-intake-copy"><span class="object-label">Photo intake</span><strong>Upload or take one receiving photo</strong><p>Choose the current ERP lot yourself before asking for a visible observation. The photo is attached to this case and remains separate from manual QC.</p></div>
+                <div class="ops-photo-intake-copy"><span class="object-label">Photo intake</span><strong>Upload or take one receiving photo</strong><p>Attach a current receiving view, then choose its ERP lot and purpose.</p></div>
                 <label class="ops-field" for="ops-photo-file">Photo<input id="ops-photo-file" type="file" accept="image/jpeg,image/png" capture="environment" /></label>
                 <label class="ops-field" for="ops-photo-lot">Analysis scope · ERP lot<select id="ops-photo-lot"><option value="">Choose a current ERP lot…</option></select></label>
+                <label class="ops-field" for="ops-photo-purpose">What are you checking?<select id="ops-photo-purpose"><option value="overview">Overall receiving view</option><option value="label">Product / lot label</option><option value="detail">Close detail / condition</option></select></label>
                 <div id="ops-photo-preview" class="ops-photo-preview" hidden></div>
-                <div class="ops-photo-analysis-actions"><button id="ops-photo-analyze" class="button button-primary" type="button" disabled><i class="ph ph-scan" aria-hidden="true"></i><span>Analyze photo</span></button><span id="ops-photo-analysis-feedback" class="ops-feedback" role="status" aria-live="polite"></span></div>
+                <div id="ops-photo-purpose-guidance" class="ops-photo-purpose-guidance" aria-live="polite"></div>
+                <div class="ops-photo-analysis-actions"><button id="ops-photo-reshoot" class="button button-quiet" type="button" disabled><i class="ph ph-camera" aria-hidden="true"></i><span>Take another photo</span></button><button id="ops-photo-analyze" class="button button-primary" type="button" disabled><i class="ph ph-scan" aria-hidden="true"></i><span>Analyze photo</span></button><span id="ops-photo-analysis-feedback" class="ops-feedback" role="status" aria-live="polite"></span></div>
                 <div id="ops-photo-analysis-result" class="ops-photo-analysis-result" aria-live="polite" hidden></div>
-                <p class="ops-photo-intake-note">Visible evidence only: hidden contents, dimensions, and quality clearance are never inferred. Existing manual QC and manager approval remain available below.</p>
+                <details id="ops-photo-review-inline-details" class="ops-photo-review-inline-details" hidden><summary>View ERP scope and observations</summary><div id="ops-photo-review-inline" class="ops-photo-review-inline" aria-live="polite" hidden></div></details>
+                <details id="ops-photo-intake-details" class="ops-photo-intake-details"><summary>Photo boundaries</summary><p class="ops-photo-intake-note">Visible evidence only: hidden contents, dimensions, and quality clearance are never inferred. Existing manual QC and manager approval remain available below.</p></details>
               </div>
               <div class="ops-form-row ops-template-row">
                 <label class="ops-field ops-field-wide" for="ops-template-select">Evidence template<select id="ops-template-select" required><option value="">Choose an approved event…</option></select></label>
@@ -204,7 +212,7 @@
               <div id="ops-template-fields" class="ops-template-fields" aria-live="polite"></div>
               <div class="ops-form-row ops-common-fields">
                 <label class="ops-field" for="ops-evidence-ref">Evidence ID<input id="ops-evidence-ref" name="evidence_ref" type="text" maxlength="180" placeholder="e.g. scanner-run-04" required /></label>
-                <div class="ops-recording-note"><span class="object-label">Provenance</span><strong>Operator-declared evidence</strong><small>The agent can explain current evidence but does not create this event.</small></div>
+                <details class="ops-recording-note ops-recording-details"><summary>View evidence provenance</summary><strong>Operator-declared evidence</strong><small>The agent can explain current evidence but does not create this event.</small></details>
               </div>
               <div class="ops-form-actions"><button id="ops-process-event" class="button button-primary" type="submit" disabled><i class="ph ph-clipboard-text" aria-hidden="true"></i>Prepare for approval</button><span id="ops-event-feedback" class="ops-feedback" role="status" aria-live="polite"></span></div>
             </form>
@@ -218,8 +226,8 @@
           </section>
 
           <section id="ops-benchmark-panel" class="ops-panel ops-benchmark-panel" aria-labelledby="ops-benchmark-title">
-            <header class="ops-panel-header">
-              <div><span class="object-label">Case signal</span><h2 id="ops-benchmark-title">Completion against customer commitments</h2></div>
+            <header id="ops-benchmark-toggle" class="ops-panel-header" role="button" tabindex="0" aria-expanded="false">
+              <div><span class="object-label">Case signal</span><h2 id="ops-benchmark-title">Benchmarks &amp; trends</h2></div>
               <span id="ops-benchmark-state" class="state-badge state-neutral">Reading source</span>
             </header>
             <div id="ops-benchmark-grid" class="ops-benchmark-grid" aria-live="polite"></div>
@@ -286,6 +294,6 @@
       <div id="ops-evidence-drawer-facts" class="ops-evidence-drawer-facts" aria-live="polite"></div>
       <button id="ops-evidence-drawer-open-operations" class="button button-primary" type="button">Open full operations evidence</button>
     </aside>
-    <script src="/distributor-operations.js?v=20260913-economic-ui-v5"></script>
+    <script src="/distributor-operations.js?v=20260913-economic-ui-v7"></script>
   </body>
 </html>

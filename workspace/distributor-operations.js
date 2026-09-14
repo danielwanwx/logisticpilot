@@ -48,7 +48,15 @@
   const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
   const text = (value) => typeof value === "string" ? value.trim() : "";
-  const opsTargetView = (target) => target === "ops-chat-panel" || target === "ops-evidence-panel" ? "agent" : "operations";
+  function displayUnit(value, fallback = "units") {
+    const unit = text(value);
+    return /^nos$/i.test(unit) ? "units" : unit || fallback;
+  }
+  const opsTargetView = (target) => {
+    const normalized = text(target).replace(/^#+/, "");
+    if (normalized === "ops-chat-panel" || normalized === "ops-overview" || normalized === "ops-economic-panel") return "agent";
+    return "operations";
+  };
   function opsTargetRoute(target, currentHref = "http://localhost/operations") {
     const normalizedTarget = text(target).replace(/^#+/, "");
     if (!normalizedTarget) return null;
@@ -309,7 +317,7 @@
     if (!isRecord(value)) return "Quantity unavailable";
     const amount = numberFrom(value);
     if (finite(amount)) {
-      const unit = firstText(value, ["uom", "unit", "unit_label", "units_label"]);
+      const unit = displayUnit(firstText(value, ["uom", "unit", "unit_label", "units_label"]), "");
       return `${formatNumber(amount)}${unit ? ` ${unit}` : ""}`;
     }
     const entries = Object.entries(value)
@@ -1006,7 +1014,7 @@
       target,
       dispatched,
       confirmed,
-      unit: text(next.quantities.uom) || "units",
+      unit: displayUnit(next.quantities.uom),
       order_count: targets.length,
       synthetic: next.synthetic_input === true,
     };
@@ -1039,7 +1047,7 @@
   }
 
   function flowStageFacts(next, stage) {
-    const unit = text(next?.quantities?.uom) || "units";
+    const unit = displayUnit(next?.quantities?.uom);
     const current = quantity(next, stage.metric);
     const dispatched = quantity(next, "dispatched");
     const ordered = quantity(next, "ordered");
@@ -1478,6 +1486,8 @@
   let photoPreviewUrl = "";
   let selectedPhotoAttachmentId = "";
   let selectedPhotoLot = "";
+  let selectedPhotoPurpose = "overview";
+  let selectedPhotoSupersedesAttachmentId = "";
   let photoAnalysisPending = false;
   let photoAnalysisFeedback = { message: "", tone: "" };
   let evidenceDrawerTrigger = null;
@@ -1494,8 +1504,12 @@
   }
   function renderRefreshState({ retryPending = false } = {}) {
     const status = evidenceStatusLabel(projection);
-    setText("ops-evidence-retention", status);
-    setText("ops-refresh-state", retryPending ? `Source retry pending · ${status}` : status);
+    const upper = status.toUpperCase();
+    const concise = /UNAVAILABLE|ERROR|FAILED|DISABLED/.test(upper)
+      ? "Needs attention"
+      : isRetainedEvidence(projection?.evidence_mode) ? "Retained" : "Synced";
+    setText("ops-evidence-retention", retryPending ? "Syncing" : concise);
+    setText("ops-refresh-state", retryPending ? "Syncing" : concise);
   }
   function showSourceError(error, { configuredSourceFailure = false } = {}) {
     const retained = isRetainedEvidence(projection?.evidence_mode);
@@ -1508,8 +1522,8 @@
     if (retained) {
       renderRefreshState({ retryPending: Boolean(lastProjectionAt) });
     } else {
-      setText("ops-evidence-retention", "SOURCE UNAVAILABLE");
-      setText("ops-refresh-state", "SOURCE UNAVAILABLE · current facts are not available");
+      setText("ops-evidence-retention", "Needs attention");
+      setText("ops-refresh-state", "Needs attention");
       document.body.dataset.operationsState = "unavailable";
       renderUnavailablePresentation();
     }
@@ -1526,7 +1540,7 @@
   function clearSourceError() {
     sourceState.hidden = true;
     const retained = Boolean(retainedEvidenceLabel(projection?.evidence_mode, projection));
-    setConnection(retained ? "Retained evidence" : "Current ERP projection", retained ? "cyan" : "lime");
+    setConnection(retained ? "Retained" : "Synced", retained ? "cyan" : "lime");
     renderRefreshState();
     updateEventButton();
     syncFreshEventControls(projection);
@@ -1558,7 +1572,7 @@
   }
   function renderQuantities(next) {
     const q = next.quantities || {};
-    const unit = text(q.uom) || "Unit not confirmed";
+    const unit = displayUnit(q.uom, "Unit not confirmed");
     const allocationPending = pendingAllocationEligibility(next).status === "PENDING";
     const cartons = cartonsSummary(q.cartons);
     const cartonsNode = $("ops-quantity-cartons");
@@ -1574,7 +1588,7 @@
     if (allocatedLabel) allocatedLabel.textContent = allocationPending ? "Proposed allocation" : "Allocated";
     setText("ops-quantity-delivery-confirmed-label", next.synthetic_input === true ? "Carrier confirmation declared" : "Delivery confirmation");
     setText("ops-uom-note", text(q.uom)
-      ? `Parts are shown in stock UOM ${q.uom}; cartons remain a separate outer-package observation.`
+      ? `Parts are shown in stock UOM ${unit}; cartons remain a separate outer-package observation.`
       : "Stock UOM is not confirmed; cartons and part quantities remain separate observations.");
   }
 
@@ -1612,26 +1626,45 @@
   }
 
   function renderHero(next) {
-    const unit = text(next?.quantities?.uom) || "units";
+    const unit = displayUnit(next?.quantities?.uom);
+    const usable = quantity(next, "usable");
+    const held = quantity(next, "held");
     const received = quantity(next, "received");
     const dispatched = quantity(next, "dispatched");
+    const awaitingRelease = quantity(next, "awaiting_release");
     const purchaseOrder = purchaseOrderDisplay(next);
     const available = next?.available === true;
+    const view = document.body.dataset.opsView || "dashboard";
     const title = !available
       ? "Operation facts unavailable"
-      : finite(received) && finite(dispatched)
-        ? `Receiving ${formatNumber(received)} · Dispatch ${formatNumber(dispatched)}`
-        : finite(received)
-          ? `Receiving ${formatNumber(received)} ${unit}`
-          : finite(dispatched)
-            ? `Dispatch ${formatNumber(dispatched)} ${unit}`
-            : "Order facts awaiting source evidence";
+      : view === "agent"
+        ? "Investigate this order"
+        : view === "operations"
+          ? "Receive & fulfill"
+          : finite(usable)
+            ? usable > 0 ? `${formatNumber(usable)} ${unit} ready to ship` : finite(dispatched) && dispatched > 0 ? `${formatNumber(dispatched)} ${unit} dispatched` : `${formatNumber(usable)} ${unit} ready to ship`
+            : finite(received)
+              ? `${formatNumber(received)} ${unit} received`
+              : finite(dispatched)
+                ? `${formatNumber(dispatched)} ${unit} dispatched`
+                : "Order facts awaiting source evidence";
     const copy = !available
-      ? "The source did not return current operation facts. Quantities and order value are unknown."
-      : isRetainedEvidence(next?.evidence_mode)
-        ? "Accepted facts are retained as of the recorded source time; fresh operations are disabled."
-        : "The accepted projection supplies each quantity, commitment, and dispatch fact shown here.";
-    setText("ops-hero-context", purchaseOrder ? `Order journey · ${purchaseOrder}` : "Evidence-led order operations");
+      ? "Current order facts are unavailable."
+      : view === "agent"
+        ? "Review the evidence and ask the agent what should move next."
+        : view === "operations"
+          ? "Capture receiving evidence, confirm the exact action, and hand it to a manager."
+          : finite(dispatched) && dispatched > 0
+            ? `${formatNumber(dispatched)} ${unit} dispatched${finite(awaitingRelease) && awaitingRelease > 0 ? ` · ${formatNumber(awaitingRelease)} awaiting release` : finite(held) && held > 0 ? ` · ${formatNumber(held)} awaiting release` : ""}`
+            : finite(held) && held > 0
+              ? `${formatNumber(held)} ${unit} awaiting inspection`
+              : finite(received) && finite(dispatched)
+                ? `${formatNumber(received)} ${unit} received · ${formatNumber(dispatched)} dispatched`
+              : purchaseOrder
+                ? `Order ${purchaseOrder}`
+                : "Current order status";
+    const context = view === "agent" ? "Investigate this order" : view === "operations" ? "Receive & fulfill" : "Overview";
+    setText("ops-hero-context", context);
     setText("ops-title", title);
     setText("ops-hero-copy", copy);
     setText("ops-hero-case", next?.case_id || "Case unavailable");
@@ -1645,7 +1678,10 @@
     setText("ops-order-value", details.value);
     setText("ops-order-value-label", details.label);
     setText("ops-order-dispatch", finite(dispatched) ? `Dispatch ${formatNumber(dispatched)}` : "Unknown");
-    setText("ops-order-allocations", allocationDigest(next));
+    const allocated = quantity(next, "allocated");
+    setText("ops-order-allocations", finite(allocated) ? displayQuantity(allocated) : "Unknown");
+    const investigate = $("ops-order-value-investigate");
+    if (investigate) investigate.hidden = !(economicConfigured && economicProposalFrom(next));
     const confirmation = finite(confirmed)
       ? `${carrierConfirmationLabel(next, confirmed, quantity(next, "ordered"))}${next?.synthetic_input === true ? "; declared synthetic carrier confirmation, not independently verified receipt." : "."}`
       : "Delivery confirmation is unavailable from the accepted source.";
@@ -1670,7 +1706,7 @@
   function renderEvidenceDrawer(next) {
     const list = $("ops-evidence-drawer-facts");
     if (!list) return;
-    const unit = text(next?.quantities?.uom) || "units";
+    const unit = displayUnit(next?.quantities?.uom);
     const received = quantity(next, "received");
     const dispatched = quantity(next, "dispatched");
     const confirmed = quantity(next, "delivery_confirmed");
@@ -2107,8 +2143,8 @@
     if (!grid || !badge) return;
     if (benchmark.status !== "CURRENT") {
       badge.className = "state-badge state-neutral"; badge.textContent = "Comparison unavailable";
-      setText("ops-benchmark-note", `${sourceAwareErpText(benchmark.reason, next?.evidence_mode)} Historical, industry, and savings baselines are unavailable.`);
-      grid.replaceChildren(emptyList("No comparable current-case benchmark is available.")); return;
+      setText("ops-benchmark-note", "No comparison baseline is available for this case.");
+      grid.replaceChildren(emptyList("No comparison baseline available.")); return;
     }
     badge.className = "state-badge state-cyan"; badge.textContent = retained ? "Retained case only" : "Current case only";
     const card = (label, actual, descriptor) => {
@@ -2124,7 +2160,7 @@
       card("Native dispatch", benchmark.dispatched, "Recorded dispatch"),
       card(benchmark.synthetic ? "Carrier confirmation declared" : "Delivery confirmation recorded", benchmark.confirmed, benchmark.synthetic ? "Declared synthetic carrier confirmation; not independently verified receipt" : "Recorded event"),
     );
-    setText("ops-benchmark-note", `Source: ${sourceLabel} · Sample: one configured operation · Historical, industry, and savings baselines are unavailable.`);
+    setText("ops-benchmark-note", `${sourceLabel} · Current case only. Historical comparison is unavailable.`);
   }
 
   function allocationPicked(next) {
@@ -2190,7 +2226,11 @@
         const evidence = document.createElement("a");
         evidence.className = "ops-stage-alert-link";
         evidence.href = `#ops-alert-${alert.index}`;
-        evidence.textContent = `${alert.code} · View evidence`;
+        evidence.textContent = alertStage(alert) === "inspection" ? "Review hold" : "Review alert";
+        evidence.addEventListener("click", (event) => {
+          event.preventDefault();
+          focusOpsTarget(`ops-alert-${alert.index}`);
+        });
         item.append(evidence);
       }
       return item;
@@ -2201,8 +2241,8 @@
     const requested = text(new URLSearchParams(window.location.search).get("view")).toLowerCase();
     if (["dashboard", "agent", "operations"].includes(requested)) return requested;
     const hash = text(window.location.hash).toLowerCase();
-    if (hash === "#ops-chat-panel" || hash === "#ops-evidence-panel") return "agent";
-    if (["#ops-flow-panel", "#ops-alerts-panel", "#ops-details", "#ops-documents-panel", "#ops-handoffs-panel"].includes(hash)) return "operations";
+    if (["#ops-chat-panel", "#ops-overview", "#ops-economic-panel"].includes(hash)) return "agent";
+    if (["#ops-flow-panel", "#ops-alerts-panel", "#ops-details", "#ops-documents-panel", "#ops-handoffs-panel", "#ops-evidence-panel", "#ops-photo-intake", "#ops-proposal-panel"].includes(hash)) return "operations";
     return "dashboard";
   }
 
@@ -2215,9 +2255,41 @@
       if (selected) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     });
+    if (projection) {
+      renderHero(projection);
+      renderPhotos(projection);
+    }
+    if (normalized === "agent" && scrollTarget === "ops-economic-panel") {
+      const economicPanel = $("ops-economic-panel");
+      const economicToggle = $("ops-economic-toggle");
+      economicPanel?.classList.add("is-expanded");
+      economicToggle?.setAttribute("aria-expanded", "true");
+    }
     if (scrollTarget) {
       window.requestAnimationFrame(() => $(scrollTarget)?.scrollIntoView({ behavior: "smooth", block: "start" }));
     }
+  }
+
+  function toggleCollapsiblePanel(panelId, toggleId) {
+    const panel = $(panelId);
+    const toggle = $(toggleId);
+    if (!panel || !toggle) return;
+    const expanded = panel.classList.toggle("is-expanded");
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  }
+
+  function bindCollapsiblePanel(panelId, toggleId) {
+    const toggle = $(toggleId);
+    if (!toggle) return;
+    toggle.addEventListener("click", (event) => {
+      if (event.target.closest("a, button")) return;
+      toggleCollapsiblePanel(panelId, toggleId);
+    });
+    toggle.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggleCollapsiblePanel(panelId, toggleId);
+    });
   }
 
   function focusOpsTarget(target) {
@@ -2460,7 +2532,7 @@
       : `Date first; customer priority breaks ties. The server calculated this feasible plan from the contract terms. Actual pick and dispatch evidence remains in the fulfillment rows below. ${candidateRule}`);
     const meta = $("ops-contract-meta");
     if (meta) {
-      const unit = text(next.quantities?.uom) || "unit";
+      const unit = displayUnit(next.quantities?.uom, "unit");
       meta.textContent = `Contract policy v1 · Planned additional quantity ${displayQuantity(numberFrom(plan.new_quantity))} ${unit}`;
     }
     const list = $("ops-contract-rows");
@@ -2810,7 +2882,7 @@
       invoices.append(emptyList(`Invoice records are unavailable from the ${sourceLabel}.`));
       return;
     }
-    const unit = text(next.quantities?.uom) || "units";
+    const unit = displayUnit(next.quantities?.uom);
     if (financials.purchase_order) {
       orders.append(financialOrderCard(financials.purchase_order, "Purchase order", unit));
     }
@@ -2832,7 +2904,7 @@
   function arrivalQuantitySummary(event, next) {
     const observed = numberFrom(event.observed_stock_quantity);
     if (!finite(observed)) return "Quantity count unknown";
-    const unit = text(next?.quantities?.stock_uom) || text(next?.quantities?.uom) || text(event.stock_uom) || text(event.uom);
+    const unit = displayUnit(next?.quantities?.stock_uom || next?.quantities?.uom || event.stock_uom || event.uom, "");
     return `${formatNumber(observed)}${unit ? ` ${unit}` : ""} counted`;
   }
   function eventSummary(event, next) {
@@ -3215,6 +3287,222 @@
     return next?.photo_analysis_enabled === true;
   }
 
+  function photoPurposeLabel(value) {
+    const purpose = text(value).toLowerCase();
+    if (purpose === "overview") return "Overall receiving view";
+    if (purpose === "label") return "Product / lot label";
+    if (purpose === "detail") return "Close detail / condition";
+    return purpose ? pretty(purpose) : "Purpose unavailable";
+  }
+
+  function photoPurposeGuidance(value) {
+    const purpose = text(value).toLowerCase();
+    if (purpose === "label") return "Use a close, readable label view to compare the observed item and lot with the current ERP scope.";
+    if (purpose === "detail") return "Use a close detail view for a specific visible condition; it does not clear quality or update stock.";
+    return "Use a complete receiving view for visible condition and framing; it does not establish hidden contents or quantity.";
+  }
+
+  function photoReviewSourceLabel(value) {
+    const status = text(value).toUpperCase();
+    if (status === "CURRENT") return "Current ERP source";
+    if (status === "RETAINED_AS_OF" || status === "RETAINED") return "Retained ERP evidence";
+    if (status.includes("UNAVAILABLE")) return "ERP source unavailable";
+    return status ? pretty(status) : "ERP source status unavailable";
+  }
+
+  function photoReviewLotText(value) {
+    if (typeof value === "string") return text(value) || "Lot unavailable";
+    if (!isRecord(value)) return "No current ERP lot selected";
+    const lot = firstText(value, ["lot", "lot_id", "name", "id"]);
+    const status = firstText(value, ["status", "inspection_result", "quality_result"]);
+    const received = numberFromKeys(value, ["received", "received_quantity"]);
+    const usable = numberFromKeys(value, ["usable", "usable_quantity"]);
+    const held = numberFromKeys(value, ["held", "held_quantity"]);
+    return [
+      lot || "Lot unavailable",
+      status ? pretty(status) : "",
+      finite(received) ? `${formatNumber(received)} received` : "",
+      finite(usable) ? `${formatNumber(usable)} usable` : "",
+      finite(held) ? `${formatNumber(held)} held` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function photoReviewQuantitiesText(value) {
+    if (!isRecord(value)) return "Quantities unavailable from source.";
+    const uom = displayUnit(value.uom);
+    const usable = numberFromKeys(value, ["usable", "usable_quantity"]);
+    const held = numberFromKeys(value, ["held", "held_quantity"]);
+    return [
+      finite(usable) ? `${formatNumber(usable)} usable ${uom}` : "Usable quantity unavailable",
+      finite(held) ? `${formatNumber(held)} held ${uom}` : "Held quantity unavailable",
+    ].join(" · ");
+  }
+
+  function photoReviewPolicyText(value) {
+    if (typeof value === "string") return text(value);
+    if (!isRecord(value)) return "";
+    const specification = text(value.synthetic_specification);
+    const source = firstText(value, ["specification_source"]);
+    const criteria = isRecord(value.inspection_criteria)
+      ? Object.entries(value.inspection_criteria)
+        .filter(([, bounds]) => isRecord(bounds))
+        .map(([name, bounds]) => {
+          const minimum = numberFromKeys(bounds, ["minimum", "min"]);
+          const maximum = numberFromKeys(bounds, ["maximum", "max"]);
+          return `${pretty(name)}${finite(minimum) ? ` ≥ ${formatNumber(minimum)}` : ""}${finite(maximum) ? ` ≤ ${formatNumber(maximum)}` : ""}`;
+        })
+        .filter(Boolean)
+        .slice(0, 3)
+      : [];
+    return [
+      specification ? `Specification source ${pretty(specification)}` : "",
+      source && source !== specification ? `Policy source ${pretty(source)}` : "",
+      criteria.length ? `Inspection bounds: ${criteria.join("; ")}` : "",
+      value.inspection_required === true ? "Inspection required by current policy" : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function photoReviewObservationText(value) {
+    if (typeof value === "string") return text(value);
+    if (!isRecord(value)) return "";
+    const assessment = isRecord(value.assessment) ? value.assessment : {};
+    const condition = firstText(value, ["visible_condition"]) || firstText(assessment, ["visible_condition"]);
+    const visibility = firstText(value, ["visibility", "label_visibility", "detail_visibility"])
+      || firstText(assessment, ["visibility", "label_visibility", "detail_visibility"]);
+    const recommendation = firstText(value, ["recommendation_code"]);
+    const lot = firstText(value, ["linked_lot"]);
+    const issues = Array.isArray(assessment.issues) ? assessment.issues.map((item) => text(item)).filter(Boolean).slice(0, 2) : [];
+    const observations = Array.isArray(assessment.observations) ? assessment.observations.map((item) => text(item)).filter(Boolean).slice(0, 2) : [];
+    return [
+      condition ? photoConditionLabel(condition) : "",
+      visibility ? photoVisibilityLabel(visibility) : "",
+      recommendation ? pretty(recommendation) : "",
+      lot ? `lot ${lot}` : "",
+      issues.length ? `issues: ${issues.join("; ")}` : "",
+      observations.length ? `observations: ${observations.join("; ")}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function photoReviewOrderText(value) {
+    if (typeof value === "string") return { label: text(value) || "Affected order", quantity: "Still fulfillable quantity unavailable" };
+    if (!isRecord(value)) return null;
+    const label = firstText(value, ["order_id", "customer_order", "sales_order", "order", "id", "name"]) || "Affected order";
+    const customer = firstText(value, ["customer", "customer_name"]);
+    const quantity = numberFromKeys(value, ["still_fulfillable_quantity", "fulfillable_quantity", "fulfillable"]);
+    const requested = numberFromKeys(value, ["requested_quantity"]);
+    const allocated = numberFromKeys(value, ["allocated"]);
+    const backordered = numberFromKeys(value, ["backordered"]);
+    const dispatched = numberFromKeys(value, ["dispatched"]);
+    const authority = firstText(value, ["still_fulfillable_authority"]);
+    const uom = displayUnit(firstText(value, ["uom", "unit", "unit_label"]), "");
+    return {
+      label: customer ? `${label} · ${customer}` : label,
+      quantity: finite(quantity)
+        ? `${formatNumber(quantity)} still fulfillable${uom ? ` ${uom}` : ""}${authority ? ` · ${pretty(authority)}` : ""}`
+        : [
+          finite(requested) ? `${formatNumber(requested)} requested` : "",
+          finite(allocated) ? `${formatNumber(allocated)} allocated` : "",
+          finite(backordered) ? `${formatNumber(backordered)} backordered` : "",
+          finite(dispatched) ? `${formatNumber(dispatched)} dispatched` : "",
+        ].filter(Boolean).join(" · ") || "ERP order quantities unavailable",
+    };
+  }
+
+  function openEconomicFlow() {
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "agent");
+    url.hash = "ops-economic-panel";
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    setOpsView("agent", { scrollTarget: "ops-economic-panel" });
+  }
+
+  function renderPhotoReviewCard(parent, next, attachment = null) {
+    if (!parent) return;
+    const card = isRecord(next?.photo_review_card) ? next.photo_review_card : null;
+    parent.replaceChildren();
+    parent.hidden = !card;
+    if (!card) return;
+    const header = document.createElement("header"); header.className = "ops-photo-review-header";
+    const heading = document.createElement("div");
+    const title = document.createElement("strong"); title.textContent = "Receiving check";
+    const revision = firstText(card, ["source_revision"]);
+    const revisionLabel = revision.length > 16 ? `${revision.slice(0, 12)}…` : revision;
+    const detail = document.createElement("small"); detail.textContent = [photoReviewSourceLabel(card.source_status), revisionLabel ? `source ${revisionLabel}` : ""].filter(Boolean).join(" · ");
+    if (revision) detail.title = revision;
+    heading.append(title, detail);
+    const badge = document.createElement("span"); badge.className = "state-badge state-cyan"; badge.textContent = photoReviewSourceLabel(card.source_status);
+    header.append(heading, badge); parent.append(header);
+    const facts = document.createElement("div"); facts.className = "ops-photo-review-facts";
+    const factsValues = [
+      ["Configured item", typeof card.configured_item === "string" ? text(card.configured_item) : firstText(card.configured_item, ["item_code", "label", "id"]) || "Item scope unavailable"],
+      ["Latest analyzed ERP lot", photoReviewLotText(card.selected_lot)],
+      ["Current quantity", photoReviewQuantitiesText(card.quantities)],
+    ];
+    const linkedAnalysis = isRecord(attachment?.analysis) ? attachment.analysis : null;
+    if (linkedAnalysis) {
+      const linkedLot = firstText(linkedAnalysis, ["linked_lot"]);
+      const linkedSource = firstText(linkedAnalysis, ["linkage_source"]).toUpperCase();
+      const freshness = photoAdviceFreshnessLabel(linkedAnalysis, card);
+      factsValues.push([
+        "Photo ERP link",
+        [linkedSource === "OPERATOR_SELECTED" && linkedLot
+          ? `Operator-selected lot ${linkedLot}`
+          : "No operator-selected lot linked to this analysis", freshness ? `· ${freshness}` : ""].filter(Boolean).join(" "),
+      ]);
+    } else if (isRecord(card.analysis_context) && (card.analysis_context.attachment_id || card.analysis_context.linked_lot || card.analysis_context.purpose)) {
+      const context = card.analysis_context;
+      const contextLot = firstText(context, ["linked_lot"]);
+      const contextPurpose = firstText(context, ["purpose"]);
+      const freshness = photoAdviceFreshnessLabel(context, card);
+      factsValues.push([
+        "Latest photo scope",
+        [contextPurpose ? photoPurposeLabel(contextPurpose) : "", contextLot ? `lot ${contextLot}` : "", freshness].filter(Boolean).join(" · "),
+      ]);
+    }
+    factsValues.forEach(([label, value]) => {
+      const fact = document.createElement("div"); fact.className = "ops-photo-review-fact";
+      const name = document.createElement("strong"); name.textContent = label;
+      const valueNode = document.createElement("span"); valueNode.textContent = value;
+      fact.append(name, valueNode); facts.append(fact);
+    });
+    parent.append(facts);
+    const policy = photoReviewPolicyText(card.quality_policy);
+    if (policy) {
+      const policyNode = document.createElement("p"); policyNode.className = "ops-photo-review-policy";
+      const specification = isRecord(card.quality_policy) ? text(card.quality_policy.synthetic_specification).toUpperCase() : "";
+      const specificationSource = isRecord(card.quality_policy) ? firstText(card.quality_policy, ["specification_source"]).toUpperCase() : "";
+      const syntheticSpecification = specification === "SYNTHETIC_CONFIG"
+        || specificationSource === "SYNTHETIC_CONFIG"
+        || (isRecord(card.quality_policy) && card.quality_policy.synthetic_specification === true);
+      const label = document.createElement("strong");
+      label.textContent = syntheticSpecification ? "Synthetic quality specification: " : "Configured quality policy: ";
+      policyNode.append(label, document.createTextNode(policy)); parent.append(policyNode);
+    }
+    const observations = Array.isArray(card.current_observations) ? card.current_observations.map(photoReviewObservationText).filter(Boolean) : [];
+    if (observations.length) {
+      const observationNode = document.createElement("div"); observationNode.className = "ops-photo-review-observations";
+      const label = document.createElement("strong"); label.textContent = "Current photo observations";
+      const list = document.createElement("ul"); observations.slice(0, 4).forEach((item) => { const row = document.createElement("li"); row.textContent = item; list.append(row); });
+      observationNode.append(label, list); parent.append(observationNode);
+    }
+    const orders = Array.isArray(card.affected_orders) ? card.affected_orders.map(photoReviewOrderText).filter(Boolean) : [];
+    if (orders.length) {
+      const ordersNode = document.createElement("div"); ordersNode.className = "ops-photo-review-orders";
+      const label = document.createElement("strong"); label.textContent = "Affected orders"; ordersNode.append(label);
+      orders.slice(0, 5).forEach((order) => {
+        const row = document.createElement("div"); row.className = "ops-photo-review-order";
+        const name = document.createElement("strong"); name.textContent = order.label;
+        const quantity = document.createElement("span"); quantity.textContent = order.quantity;
+        row.append(name, quantity); ordersNode.append(row);
+      });
+      parent.append(ordersNode);
+    }
+    if (economicConfigured || isRecord(next?.economic_proposal)) {
+      const cta = document.createElement("button"); cta.type = "button"; cta.className = "button button-quiet ops-photo-review-cta";
+      cta.textContent = "Open economic decision"; cta.addEventListener("click", openEconomicFlow); parent.append(cta);
+    }
+  }
+
   function photoLotIdentifier(lot) {
     return firstText(lot, ["lot", "lot_id", "name", "id"]);
   }
@@ -3256,6 +3544,11 @@
     const issues = Array.isArray(assessment.issues)
       ? assessment.issues.map((item) => text(item)).filter(Boolean).slice(0, 3)
       : [];
+    const observations = Array.isArray(assessment.observations)
+      ? assessment.observations.map((item) => text(item)).filter(Boolean).slice(0, 3)
+      : text(assessment.observations) ? [text(assessment.observations)] : [];
+    const labelVisibility = firstText(assessment, ["label_visibility"]);
+    const detailVisibility = firstText(assessment, ["detail_visibility"]);
     const labels = [
       firstText(assessment, ["item_code"]) ? `Photo label item ${firstText(assessment, ["item_code"])}` : "",
       firstText(assessment, ["supplier_lot"]) ? `Photo label lot ${firstText(assessment, ["supplier_lot"])}` : "",
@@ -3264,9 +3557,71 @@
       firstText(assessment, ["visible_condition"]) ? `Visible condition: ${photoConditionLabel(assessment.visible_condition)}` : "",
       firstText(assessment, ["visibility"]) ? `Visibility: ${photoVisibilityLabel(assessment.visibility)}` : "",
       issues.length ? `Observed issue: ${issues.join("; ")}` : "",
+      observations.length ? `Observed detail: ${observations.join("; ")}` : "",
+      labelVisibility ? `Label visibility: ${pretty(labelVisibility)}` : "",
+      detailVisibility ? `Detail visibility: ${pretty(detailVisibility)}` : "",
       ...labels,
     ].filter(Boolean);
     return parts.join(" · ") || "No visible observation was returned by the source.";
+  }
+
+  function photoAnalysisSummary(analysis) {
+    const assessment = isRecord(analysis?.assessment) ? analysis.assessment : {};
+    const condition = firstText(assessment, ["visible_condition"]);
+    const visibility = firstText(assessment, ["visibility", "label_visibility", "detail_visibility"]);
+    return [
+      condition ? `Visible condition: ${photoConditionLabel(condition)}` : "",
+      visibility ? `Visibility: ${photoVisibilityLabel(visibility)}` : "",
+    ].filter(Boolean).join(" · ") || "No concise visible finding was returned by the source.";
+  }
+
+  function photoCheckStatus(value) {
+    const status = text(value).toUpperCase();
+    if (["MATCH", "MISMATCH", "UNKNOWN", "NOT_APPLICABLE"].includes(status)) return status;
+    return "UNKNOWN";
+  }
+
+  function photoNextAction(analysis) {
+    const action = isRecord(analysis?.next_action) ? analysis.next_action : {};
+    return {
+      code: firstText(action, ["code"]).toUpperCase(),
+      message: firstText(action, ["message"]),
+      suggestedPurpose: firstText(action, ["suggested_purpose"]).toLowerCase(),
+    };
+  }
+
+  function photoAdviceFreshnessLabel(analysis, card) {
+    if (!isRecord(analysis) || analysis.advisory_current !== false) return "";
+    const nextAction = firstText(analysis.next_action, ["code"]).toUpperCase();
+    const superseded = firstText(analysis, ["superseded_by_attachment_id"]);
+    if (superseded) return "Replaced by a newer photo";
+    if (nextAction === "VERIFY_IDENTITY") return "Excluded from current advice";
+    const currentRevision = firstText(card, ["source_revision"]);
+    const analysisRevision = firstText(analysis, ["source_revision"]);
+    if (currentRevision && analysisRevision && currentRevision !== analysisRevision) return "Earlier ERP state";
+    return "Excluded from current advice";
+  }
+
+  function renderPhotoChecks(parent, analysis) {
+    const checks = isRecord(analysis?.checks) ? analysis.checks : {};
+    const entries = [["item_code", "Item identity"], ["lot", "Lot identity"]]
+      .map(([key, label]) => ({ key, label, check: isRecord(checks[key]) ? checks[key] : null }))
+      .filter((entry) => entry.check);
+    if (!entries.length) return;
+    const wrapper = document.createElement("div"); wrapper.className = "ops-photo-checks";
+    const heading = document.createElement("strong"); heading.textContent = "Observed identity against ERP"; wrapper.append(heading);
+    entries.forEach(({ label, check }) => {
+      const row = document.createElement("div"); row.className = "ops-photo-check";
+      const name = document.createElement("strong"); name.textContent = label;
+      const status = photoCheckStatus(check.status);
+      const badge = document.createElement("span"); badge.className = `state-badge state-${status === "MATCH" ? "lime" : status === "MISMATCH" ? "coral" : status === "UNKNOWN" ? "amber" : "neutral"}`; badge.textContent = pretty(status);
+      const detail = document.createElement("small");
+      const observed = firstText(check, ["observed"]);
+      const expected = firstText(check, ["expected"]);
+      detail.textContent = [observed ? `Observed ${observed}` : "Observed unavailable", expected ? `ERP ${expected}` : "ERP unavailable", check.requires_review === true ? "Review required" : ""].filter(Boolean).join(" · ");
+      row.append(name, badge, detail); wrapper.append(row);
+    });
+    parent.append(wrapper);
   }
 
   function photoRecommendation(analysis) {
@@ -3324,7 +3679,7 @@
 
   function photoLinkedQuantityText(analysis, next) {
     const quantityValue = numberFrom(analysis?.linked_quantity);
-    const unit = text(next?.quantities?.uom) || "units";
+    const unit = displayUnit(next?.quantities?.uom);
     return finite(quantityValue) ? `${formatNumber(quantityValue)} ${unit}` : "ERP quantity unavailable from the source.";
   }
 
@@ -3375,14 +3730,31 @@
     }
     const status = photoAnalysisStatus(analysis);
     const recommendation = photoRecommendation(analysis);
+    const nextAction = photoNextAction(analysis);
     const assessment = isRecord(analysis.assessment) ? analysis.assessment : {};
     const condition = text(assessment.visible_condition).toLowerCase();
     if (condition === "visible_damage" || recommendation.code === "REQUIRE_INSPECTION") section.classList.add("is-damage");
     if (!recommendation.labelLotConflict && (condition === "no_visible_damage" || recommendation.code === "NO_VISIBLE_DAMAGE_NOT_QUALITY_CLEARANCE")) section.classList.add("is-clear");
-    const historical = status === "COMPLETE" && analysis.advisory_current === false;
-    if (historical) {
+    if (nextAction.code === "VERIFY_IDENTITY") section.classList.add("is-identity-warning");
+    const supersededBy = firstText(analysis, ["superseded_by_attachment_id"]);
+    const identityVerification = nextAction.code === "VERIFY_IDENTITY";
+    const currentRevision = firstText(next?.photo_review_card, ["source_revision"]);
+    const analysisRevision = firstText(analysis, ["source_revision"]);
+    const revisionStale = Boolean(currentRevision && analysisRevision && currentRevision !== analysisRevision);
+    const replacedByNewerPhoto = status === "COMPLETE" && analysis.advisory_current === false && Boolean(supersededBy);
+    const historical = status === "COMPLETE" && analysis.advisory_current === false && !identityVerification && !replacedByNewerPhoto && revisionStale;
+    const excludedFromAdvice = status === "COMPLETE" && analysis.advisory_current === false && !replacedByNewerPhoto && !historical;
+    if (replacedByNewerPhoto) {
+      const freshness = document.createElement("p"); freshness.className = "ops-photo-analysis-stale";
+      freshness.textContent = "Replaced by a newer photo.";
+      section.append(freshness);
+    } else if (historical) {
       const freshness = document.createElement("p"); freshness.className = "ops-photo-analysis-stale";
       freshness.textContent = "Earlier ERP state — reanalyze before using for current decision.";
+      section.append(freshness);
+    } else if (excludedFromAdvice) {
+      const freshness = document.createElement("p"); freshness.className = "ops-photo-analysis-stale";
+      freshness.textContent = "Excluded from current advice — resolve the identity check before relying on this observation.";
       section.append(freshness);
     }
     const header = document.createElement("div"); header.className = "ops-photo-analysis-header";
@@ -3391,25 +3763,32 @@
     badge.className = `state-badge state-${status === "COMPLETE" ? "cyan" : status === "UNAVAILABLE" ? "coral" : "neutral"}`;
     badge.textContent = status ? pretty(status) : "Status unavailable";
     header.append(title, badge); section.append(header);
+    const analysisPurpose = text(analysis.purpose).toLowerCase();
+    if (analysisPurpose) {
+      const purpose = document.createElement("p"); purpose.className = "ops-photo-analysis-purpose";
+      purpose.textContent = `Analysis purpose: ${photoPurposeLabel(analysisPurpose)}`; section.append(purpose);
+    }
     const observation = document.createElement("p"); observation.className = "ops-photo-analysis-observation";
-    const observationLabel = document.createElement("strong"); observationLabel.textContent = "Visible observation: ";
-    observation.append(observationLabel, document.createTextNode(status === "COMPLETE" ? photoAnalysisObservation(analysis) : "No visible observation was returned.")); section.append(observation);
-    const recommendationNode = document.createElement("p"); recommendationNode.className = "ops-photo-analysis-recommendation";
-    const recommendationLabel = document.createElement("strong"); recommendationLabel.textContent = `Recommendation${recommendation.code ? ` · ${pretty(recommendation.code)}` : ""}: `;
-    recommendationNode.append(recommendationLabel, document.createTextNode(recommendation.message)); section.append(recommendationNode);
+    const observationLabel = document.createElement("strong"); observationLabel.textContent = "Visible finding: ";
+    observation.append(observationLabel, document.createTextNode(status === "COMPLETE" ? photoAnalysisSummary(analysis) : "No visible observation was returned.")); section.append(observation);
+    renderPhotoChecks(section, analysis);
+    const actionCode = nextAction.code || recommendation.code;
+    const actionMessage = nextAction.message || recommendation.message;
+    if (actionMessage) {
+      const action = document.createElement("p"); action.className = "ops-photo-analysis-recommendation";
+      const actionLabel = document.createElement("strong"); actionLabel.textContent = `Next action${actionCode ? ` · ${pretty(actionCode)}` : ""}: `;
+      action.append(actionLabel, document.createTextNode(actionMessage)); section.append(action);
+    }
     const nextPhoto = firstText(assessment, ["next_photo"]);
     if (status === "COMPLETE" && nextPhoto) {
       const guidance = document.createElement("p"); guidance.className = "ops-photo-analysis-note";
       const guidanceLabel = document.createElement("strong"); guidanceLabel.textContent = recommendation.code === "RETAKE" ? "Retake guidance: " : "Suggested next photo: ";
       guidance.append(guidanceLabel, document.createTextNode(nextPhoto)); section.append(guidance);
     }
-    const scope = document.createElement("p"); scope.className = "ops-photo-analysis-scope";
-    const scopeLabel = document.createElement("strong"); scopeLabel.textContent = historical ? "ERP link at analysis: " : "ERP link: ";
-    const linkedLot = firstText(analysis, ["linked_lot"]);
-    const linkage = firstText(analysis, ["linkage_source"]).toUpperCase();
-    scope.append(scopeLabel, document.createTextNode(linkage === "OPERATOR_SELECTED" && linkedLot
-      ? `Operator-selected lot ${linkedLot} · ${photoLinkedQuantityText(analysis, next)}`
-      : "No operator-selected ERP lot was linked.")); section.append(scope);
+    if (nextAction.suggestedPurpose) {
+      const purpose = document.createElement("p"); purpose.className = "ops-photo-analysis-note";
+      purpose.textContent = `Suggested next photo purpose: ${photoPurposeLabel(nextAction.suggestedPurpose)}`; section.append(purpose);
+    }
     if (recommendation.labelLotConflict) {
       const conflict = document.createElement("p"); conflict.className = "ops-photo-analysis-note";
       conflict.textContent = recommendation.imageLabelLot
@@ -3417,10 +3796,28 @@
         : "The photo label differs from the selected ERP lot; the operator selection remains in force.";
       section.append(conflict);
     }
+    const details = document.createElement("details"); details.className = "ops-photo-analysis-details";
+    const detailsSummary = document.createElement("summary"); detailsSummary.textContent = "View observation details"; details.append(detailsSummary);
+    const richObservation = document.createElement("p"); richObservation.className = "ops-photo-analysis-observation";
+    const richObservationLabel = document.createElement("strong"); richObservationLabel.textContent = "Observation detail: ";
+    richObservation.append(richObservationLabel, document.createTextNode(status === "COMPLETE" ? photoAnalysisObservation(analysis) : "No visible observation was returned.")); details.append(richObservation);
+    const recommendationNode = document.createElement("p"); recommendationNode.className = "ops-photo-analysis-recommendation";
+    const recommendationLabel = document.createElement("strong"); recommendationLabel.textContent = `Recommendation${recommendation.code ? ` · ${pretty(recommendation.code)}` : ""}: `;
+    recommendationNode.append(recommendationLabel, document.createTextNode(recommendation.message)); details.append(recommendationNode);
+    const scope = document.createElement("p"); scope.className = "ops-photo-analysis-scope";
+    const scopeLabel = document.createElement("strong"); scopeLabel.textContent = historical ? "ERP link at analysis: " : "ERP link: ";
+    const linkedLot = firstText(analysis, ["linked_lot"]);
+    const linkage = firstText(analysis, ["linkage_source"]).toUpperCase();
+    const purpose = text(analysis.purpose).toLowerCase();
+    const linkedQuantity = purpose === "label" || purpose === "detail" ? "" : ` · ${photoLinkedQuantityText(analysis, next)}`;
+    scope.append(scopeLabel, document.createTextNode(linkage === "OPERATOR_SELECTED" && linkedLot
+      ? `Operator-selected lot ${linkedLot}${linkedQuantity}`
+      : "No operator-selected ERP lot was linked.")); details.append(scope);
     const note = document.createElement("p"); note.className = "ops-photo-analysis-note";
     note.textContent = "Visible evidence only · hidden contents, dimensions, and quality clearance are not inferred; no stock update occurred.";
-    section.append(note);
-    renderPhotoAnalysisEvidence(section, analysis);
+    details.append(note);
+    renderPhotoAnalysisEvidence(details, analysis);
+    section.append(details);
     parent.append(section); return section;
   }
 
@@ -3442,6 +3839,10 @@
     selectedPhotoLot = text(analysis?.linkage_source).toUpperCase() === "OPERATOR_SELECTED"
       ? firstText(analysis, ["linked_lot"])
       : "";
+    selectedPhotoPurpose = ["overview", "label", "detail"].includes(text(analysis?.purpose).toLowerCase())
+      ? text(analysis.purpose).toLowerCase()
+      : "overview";
+    selectedPhotoSupersedesAttachmentId = "";
     renderPhotoPreview(
       `${API_PATH}/photo?id=${encodeURIComponent(attachmentId)}`,
       "Attached case receiving photo; visible evidence only",
@@ -3449,6 +3850,19 @@
     );
     renderPhotoIntake(next || projection);
     document.querySelector(".ops-photo-intake-link")?.click();
+  }
+
+  function startPhotoReshoot() {
+    if (photoAnalysisPending || processingEvent) return;
+    const input = $("ops-photo-file");
+    if (!input || input.disabled) return;
+    const lot = selectedPhotoLot;
+    const supersedes = selectedPhotoAttachmentId;
+    resetSelectedPhoto();
+    selectedPhotoLot = lot;
+    selectedPhotoSupersedesAttachmentId = supersedes;
+    renderPhotoIntake(projection);
+    input.click();
   }
 
   function renderPhotoLotOptions(next) {
@@ -3464,7 +3878,7 @@
       const item = document.createElement("option"); item.value = value;
       const quantityValue = photoLotQuantity(lot);
       item.textContent = finite(quantityValue)
-        ? `${value} · ${formatNumber(quantityValue)} received ${text(next?.quantities?.uom) || "units"} in ERP`
+        ? `${value} · ${formatNumber(quantityValue)} received ${displayUnit(next?.quantities?.uom)} in ERP`
         : value;
       select.append(item);
     });
@@ -3482,11 +3896,23 @@
     feedback.textContent = photoAnalysisFeedback.message;
   }
 
+  function renderPhotoPurpose(next) {
+    const select = $("ops-photo-purpose");
+    const guidance = $("ops-photo-purpose-guidance");
+    if (!select) return;
+    if (!["overview", "label", "detail"].includes(selectedPhotoPurpose)) selectedPhotoPurpose = "overview";
+    select.value = selectedPhotoPurpose;
+    select.disabled = photoAnalysisPending || next?.available !== true || !photoAnalysisEnabled(next) || !sourceState?.hidden;
+    if (guidance) guidance.textContent = photoPurposeGuidance(selectedPhotoPurpose);
+  }
+
   function renderPhotoIntake(next) {
+    renderPhotoPurpose(next);
     renderPhotoLotOptions(next);
     const input = $("ops-photo-file");
     const button = $("ops-photo-analyze");
     const feedback = $("ops-photo-analysis-feedback");
+    const reshoot = $("ops-photo-reshoot");
     const enabled = photoAnalysisEnabled(next);
     const hasPhoto = Boolean(selectedPhoto || selectedPhotoAttachmentId);
     const selectedAttachment = selectedPhotoAttachmentId
@@ -3495,6 +3921,7 @@
     const selectedAnalysis = isRecord(selectedAttachment?.analysis) ? selectedAttachment.analysis : null;
     const selectedStatus = photoAnalysisStatus(selectedAnalysis);
     if (input) input.disabled = photoAnalysisPending || next?.available !== true || !freshActionsAllowed(next);
+    if (reshoot) reshoot.disabled = photoAnalysisPending || processingEvent || next?.available !== true || !freshActionsAllowed(next) || !sourceState?.hidden || !hasPhoto;
     if (button) {
       const label = button.querySelector("span");
       if (label) label.textContent = photoAnalysisPending
@@ -3518,15 +3945,85 @@
       result.hidden = !selectedAttachment;
       if (selectedAttachment) renderPhotoAnalysis(result, selectedAttachment, next);
     }
+    const inlineReview = $("ops-photo-review-inline");
+    renderPhotoReviewCard(inlineReview, next, selectedAttachment);
+    const inlineDetails = $("ops-photo-review-inline-details");
+    if (inlineDetails) inlineDetails.hidden = Boolean(inlineReview?.hidden);
+  }
+
+  function latestPhoto(photos) {
+    const overviewPhotos = photos.filter((photo) => text(photo?.analysis?.purpose).toLowerCase() === "overview");
+    const candidates = overviewPhotos.length ? overviewPhotos : photos;
+    return candidates.reduce((latest, photo) => {
+      if (!latest) return photo;
+      const currentTime = Date.parse(text(photo.recorded_at));
+      const latestTime = Date.parse(text(latest.recorded_at));
+      return Number.isFinite(currentTime) && (!Number.isFinite(latestTime) || currentTime >= latestTime) ? photo : latest;
+    }, null);
+  }
+
+  function renderPhotoDashboardEmpty() {
+    const absence = document.createElement("div"); absence.className = "ops-photo-empty";
+    const icon = document.createElement("i"); icon.className = "ph ph-camera"; icon.setAttribute("aria-hidden", "true");
+    const copy = document.createElement("div");
+    const title = document.createElement("strong"); title.textContent = "Check incoming photo";
+    const detail = document.createElement("span"); detail.textContent = "Add a receiving photo to review the latest condition.";
+    copy.append(title, detail);
+    const action = document.createElement("button"); action.type = "button"; action.className = "button button-primary"; action.textContent = "Add photo";
+    action.addEventListener("click", () => document.querySelector(".ops-photo-intake-link")?.click());
+    absence.append(icon, copy, action);
+    return absence;
+  }
+
+  function renderDashboardPhoto(photo, next) {
+    const card = document.createElement("article"); card.className = "ops-photo-dashboard-card";
+    const header = document.createElement("div"); header.className = "ops-photo-dashboard-header";
+    const title = document.createElement("strong"); title.textContent = "Latest receiving photo";
+    const status = isRecord(photo?.analysis) ? photoAnalysisStatus(photo.analysis) : "NOT_ANALYZED";
+    const badge = document.createElement("span"); badge.className = `state-badge state-${status === "COMPLETE" ? "cyan" : status === "UNAVAILABLE" ? "coral" : "neutral"}`;
+    badge.textContent = pretty(status);
+    header.append(title, badge);
+    const preview = document.createElement("div"); preview.className = "ops-photo-dashboard-preview";
+    const image = document.createElement("img"); image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(photo.attachment_id))}`;
+    image.alt = "Operator-attached receiving photo; visible evidence only"; image.loading = "lazy"; preview.append(image);
+    const body = document.createElement("div"); body.className = "ops-photo-dashboard-body";
+    const analysis = isRecord(photo?.analysis) ? photo.analysis : null;
+    const observation = document.createElement("p"); observation.className = "ops-photo-dashboard-finding";
+    if (!analysis) {
+      observation.textContent = "Photo attached · ready for a visible receiving check.";
+    } else if (status === "COMPLETE") {
+      const assessment = isRecord(analysis.assessment) ? analysis.assessment : {};
+      const condition = firstText(assessment, ["visible_condition"]);
+      const visibility = firstText(assessment, ["visibility", "label_visibility", "detail_visibility"]);
+      observation.textContent = [condition ? photoConditionLabel(condition) : "Visible condition recorded", visibility ? photoVisibilityLabel(visibility) : ""].filter(Boolean).join(" · ");
+    } else {
+      observation.textContent = "Photo analysis is unavailable; review the photo or use manual inspection.";
+    }
+    const action = document.createElement("button"); action.type = "button"; action.className = "button button-quiet ops-photo-dashboard-action"; action.textContent = "Review in Operations";
+    action.addEventListener("click", () => selectExistingPhoto(photo, next));
+    body.append(observation, action);
+    card.append(header, preview, body);
+    return card;
   }
 
   function renderPhotos(next) {
     const list = $("ops-photos-list");
     if (!list) return;
+    const dashboard = document.body.dataset.opsView === "dashboard";
+    setText("ops-photos-title", dashboard ? "Receiving check" : "Photo history");
+    const historyToggle = $("ops-photo-history-toggle");
+    if (historyToggle) historyToggle.setAttribute("aria-expanded", dashboard || document.querySelector("#ops-photos-panel.is-expanded") ? "true" : "false");
     renderPhotoIntake(next);
+    const reviewCard = $("ops-photo-review-card");
+    if (dashboard) {
+      if (reviewCard) { reviewCard.replaceChildren(); reviewCard.hidden = true; }
+    } else {
+      renderPhotoReviewCard(reviewCard, next);
+    }
     const photos = photoAttachmentList(next);
     setText("ops-photos-count", photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"}` : "No photos");
     if (!photos.length) {
+      if (dashboard) { list.replaceChildren(renderPhotoDashboardEmpty()); return; }
       const absence = document.createElement("div"); absence.className = "ops-evidence-absence";
       const icon = document.createElement("i"); icon.className = "ph ph-image-square"; icon.setAttribute("aria-hidden", "true");
       const copy = document.createElement("div");
@@ -3534,6 +4031,7 @@
       const detail = document.createElement("span"); detail.textContent = "No same-case source-backed photo is available. Image claims are not inferred.";
       copy.append(title, detail); absence.append(icon, copy); list.replaceChildren(absence); return;
     }
+    if (dashboard) { list.replaceChildren(renderDashboardPhoto(latestPhoto(photos), next)); return; }
     list.replaceChildren(...photos.map((photo) => {
       const card = document.createElement("article"); card.className = "ops-photo-card";
       const preview = document.createElement("button"); preview.type = "button"; preview.className = "ops-photo-open";
@@ -3548,8 +4046,17 @@
       });
       const copy = document.createElement("div");
       const title = document.createElement("strong"); title.textContent = "Attached receiving evidence";
+      const photoPurpose = isRecord(photo.analysis) && text(photo.analysis.purpose)
+        ? ` · ${photoPurposeLabel(photo.analysis.purpose)}`
+        : "";
+      const linkedLot = isRecord(photo.analysis) && text(photo.analysis.linkage_source).toUpperCase() === "OPERATOR_SELECTED"
+        ? firstText(photo.analysis, ["linked_lot"])
+        : "";
+      const linkedLotLabel = linkedLot ? ` · lot ${linkedLot}` : "";
+      const supersedes = isRecord(photo.analysis) ? firstText(photo.analysis, ["supersedes_attachment_id"]) : "";
+      const history = supersedes ? " · supersedes prior photo" : "";
       const detail = document.createElement("small"); detail.textContent = isRecord(photo.analysis)
-        ? `Case photo · ${pretty(photoAnalysisStatus(photo.analysis) || "analysis status unavailable")} · attachment record ${formatDate(photo.recorded_at)}`
+        ? `Case photo · ${pretty(photoAnalysisStatus(photo.analysis) || "analysis status unavailable")}${photoPurpose}${linkedLotLabel}${history} · attachment record ${formatDate(photo.recorded_at)}`
         : `Case photo · ${text(photo.interpretation) === "NOT_ANALYZED" ? "not analyzed" : "status unavailable"} · attachment record ${formatDate(photo.recorded_at)}`;
       const review = document.createElement("button"); review.type = "button"; review.className = "button button-quiet ops-photo-review";
       review.textContent = "Review / retry this photo";
@@ -3563,6 +4070,7 @@
     selectedPhoto = null;
     selectedPhotoAttachmentId = "";
     selectedPhotoLot = "";
+    selectedPhotoSupersedesAttachmentId = "";
     photoAnalysisFeedback = { message: "", tone: "" };
     if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     photoPreviewUrl = "";
@@ -3624,10 +4132,17 @@
     renderPhotoIntake(source);
     try {
       const attachmentId = await uploadSelectedPhoto();
+      const request = {
+        attachment_id: attachmentId,
+        lot,
+        purpose: ["overview", "label", "detail"].includes(selectedPhotoPurpose) ? selectedPhotoPurpose : "overview",
+      };
+      if (selectedPhotoSupersedesAttachmentId) request.supersedes_attachment_id = selectedPhotoSupersedesAttachmentId;
       const response = await requestJSON(`${API_PATH}/analyze-photo`, {
         method: "POST",
-        body: JSON.stringify({ attachment_id: attachmentId, lot }),
+        body: JSON.stringify(request),
       });
+      selectedPhotoSupersedesAttachmentId = "";
       const next = unwrapProjection(response);
       if (next) renderProjection(next);
       const analysis = photoAnalysisFor(projection, attachmentId);
@@ -3834,7 +4349,7 @@
     renderRefreshState();
     document.body.dataset.operationsState = next.available ? "ready" : "disabled";
     renderHeaderIncidentState(next);
-    setText("ops-case-label", next.case_label || (next.available ? "Current operation" : "No configured operation"));
+    setText("ops-case-label", purchaseOrderDisplay(next) || next.case_label || (next.available ? "Current operation" : "PO unavailable"));
     setText("ops-case-id", next.case_id || "Case identifier unavailable");
     setText("ops-case-po", purchaseOrderDisplay(next) || "Purchase order unavailable");
     const stageLabel = deliveryCompletionLabel(next) || pretty(next.stage);
@@ -3926,6 +4441,7 @@
       });
       const next = economicResponseProjection(response);
       if (next) renderProjection(next);
+      if (preparedProposalInResponse(response)) focusOpsTarget("ops-proposal-panel");
       setEconomicFeedback(
         preparedProposalInResponse(response)
           ? "Dispatch proposal prepared for manager approval in the existing Manager gate. No physical delivery or postage payment occurred."
@@ -4042,10 +4558,20 @@
     if (photoAnalysisFeedback.tone === "error") setPhotoAnalysisFeedback("");
     renderPhotoIntake(projection);
   });
+  $("ops-photo-purpose")?.addEventListener("change", (event) => {
+    const purpose = text(event.currentTarget.value).toLowerCase();
+    selectedPhotoPurpose = ["overview", "label", "detail"].includes(purpose) ? purpose : "overview";
+    renderPhotoIntake(projection);
+  });
+  $("ops-photo-reshoot")?.addEventListener("click", startPhotoReshoot);
   $("ops-photo-analyze")?.addEventListener("click", () => { void analyzeSelectedPhoto(); });
   $("ops-photo-file")?.addEventListener("change", (event) => {
     const file = event.target.files?.[0] || null;
+    const preservedLot = selectedPhotoLot;
+    const supersedes = selectedPhotoSupersedesAttachmentId;
     resetSelectedPhoto({ clearInput: false });
+    selectedPhotoLot = preservedLot;
+    selectedPhotoSupersedesAttachmentId = supersedes;
     if (!file) { renderPhotoIntake(projection); return; }
     if (!freshActionsAllowed(projection)) {
       setFeedback("Fresh event controls are disabled for this retained operation.", "error");
@@ -4127,6 +4653,9 @@
       focusOpsTarget(target);
     });
   });
+  bindCollapsiblePanel("ops-economic-panel", "ops-economic-toggle");
+  bindCollapsiblePanel("ops-benchmark-panel", "ops-benchmark-toggle");
+  bindCollapsiblePanel("ops-photos-panel", "ops-photo-history-toggle");
   function syncOpsViewFromLocation() {
     const target = text(window.location.hash).replace(/^#/, "");
     setOpsView(requestedOpsView(), { scrollTarget: target });

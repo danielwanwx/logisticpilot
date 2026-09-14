@@ -1,5 +1,31 @@
 # Project delivery requirements
 
+## Approved visual direction — do not replace (September 13 user correction)
+
+- Preserve Claude's approved dashboard composition in
+  `docs/design/approved-dashboard/dashboard-look-1.jpg` and
+  `docs/design/approved-dashboard/dashboard-look-2.jpg`.
+  The layout is journey and a compact KPI strip beside recent events, then a
+  large receiving photo beside a deep-green impact card, followed by a visible,
+  expandable benchmark section. Preserve the three existing workspace views.
+- Feature work must fit that composition. Do not turn the product into an audit
+  report, add walls of explanation, introduce nested outlined cards, or remove
+  benchmark access. Keep generous spacing and concise product language.
+- Keep provenance, synthetic-input explanations, raw traces, source revisions,
+  and detailed conditions in evidence drawers or expandable details. Do not
+  repeat them across the main dashboard. The demo presenter explains the POC;
+  the product presents the actual connected case state. Retain accurate source
+  records and label estimates as estimates, without fabricating metrics.
+- Photo analysis, order quantities, economic decisions, and actions must remain
+  connected to the real backend. A visual restoration must not restore old
+  hardcoded scenario data. Verify with the browser; the user owns visual approval.
+- Keep workspace responsibilities distinct: Dashboard shows current status,
+  journey/KPIs, photo summary, business impact and benchmarks. Investigation owns
+  agent reasoning, evidence comparison, candidate decisions and follow-up Q&A.
+  Operations owns photo/evidence capture, inspection, exact-action confirmation,
+  execution and readback. Share one case context and route handoffs between views;
+  do not duplicate complete forms, investigation panels or approval controls.
+
 ## Small-business hackathon scope and UI review (user steering, September 12)
 
 - Focus LogisticPilot on a small parts distributor with limited operations
