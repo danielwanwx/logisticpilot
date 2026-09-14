@@ -17,6 +17,9 @@
   quantity needed to approve an action. Do not hide these with blanket CSS.
 - Keep the approved visual composition and live backend behavior unchanged
   when simplifying copy. The user owns final visual review; no UI unit tests.
+- Slow initial reads must show a clear loading layout, not a blank workspace.
+  Bound read requests and expose a concise retry state on failure. Never fill
+  loading cards with invented case quantities or enable actions before data loads.
 
 ## Approved visual direction — do not replace (September 13 user correction)
 

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/assets/phosphor-regular.css" />
     <link rel="stylesheet" href="/assets/phosphor-bold.css" />
     <link rel="stylesheet" href="/style.css?v=source-driven-final-v32" />
-    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-economic-ui-v8" />
+    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-loading-v9" />
     <title>LogisticPilot</title>
   </head>
   <body class="operations-shell" data-operations-state="loading" data-ops-view="dashboard">
@@ -43,7 +43,7 @@
       <section class="ops-hero" aria-labelledby="ops-title">
         <div>
           <span id="ops-hero-context" class="object-label">Overview</span>
-          <h1 id="ops-title">Current order status</h1>
+          <h1 id="ops-title">Loading order…</h1>
           <p id="ops-hero-copy" class="ops-hero-copy">Current order status</p>
         </div>
         <div class="ops-hero-mark"><a id="ops-hero-investigate" class="ops-hero-action" data-ops-view-link="agent" href="/operations?view=agent#ops-overview">Investigate this order <i class="ph ph-arrow-up-right" aria-hidden="true"></i></a><span id="ops-hero-case" class="sr-only">Case loading</span><span id="ops-hero-state" class="sr-only">Evidence status pending</span></div>
@@ -62,6 +62,17 @@
         <div><strong id="ops-source-title">Source unavailable</strong><p id="ops-source-detail">Current quantities are unknown. Retry the source connection.</p></div>
         <button id="ops-retry" class="button button-quiet" type="button"><i class="ph ph-arrow-clockwise" aria-hidden="true"></i>Retry</button>
       </div>
+
+      <section id="ops-loading" class="ops-loading" role="status" aria-live="polite" aria-busy="true" aria-label="Loading order">
+        <span class="ops-loading-label sr-only">Loading order…</span>
+        <div class="ops-loading-grid" aria-hidden="true">
+          <div class="ops-loading-card ops-loading-flow"><span class="ops-loading-line ops-loading-line-kicker"></span><span class="ops-loading-line ops-loading-line-title"></span><span class="ops-loading-line"></span><span class="ops-loading-line ops-loading-line-wide"></span></div>
+          <div class="ops-loading-card ops-loading-events"><span class="ops-loading-line ops-loading-line-kicker"></span><span class="ops-loading-line ops-loading-line-title"></span><span class="ops-loading-line"></span><span class="ops-loading-line"></span><span class="ops-loading-line"></span></div>
+          <div class="ops-loading-card ops-loading-photos"><span class="ops-loading-line ops-loading-line-kicker"></span><span class="ops-loading-line ops-loading-line-title"></span><span class="ops-loading-photo"></span></div>
+          <div class="ops-loading-card ops-loading-value"><span class="ops-loading-line ops-loading-line-kicker"></span><span class="ops-loading-line ops-loading-line-title"></span><span class="ops-loading-line"></span></div>
+          <div class="ops-loading-card ops-loading-benchmark"><span class="ops-loading-line ops-loading-line-kicker"></span><span class="ops-loading-line ops-loading-line-title"></span><span class="ops-loading-line ops-loading-line-wide"></span></div>
+        </div>
+      </section>
 
       <section id="ops-disabled" class="ops-disabled ops-panel" aria-live="polite" hidden>
         <span class="ops-disabled-icon" aria-hidden="true"><i class="ph ph-plugs-connected"></i></span>
@@ -300,6 +311,6 @@
       <div id="ops-evidence-drawer-facts" class="ops-evidence-drawer-facts" aria-live="polite"></div>
       <button id="ops-evidence-drawer-open-operations" class="button button-primary" type="button">Open full operations evidence</button>
     </aside>
-    <script src="/distributor-operations.js?v=20260913-economic-ui-v8"></script>
+    <script src="/distributor-operations.js?v=20260913-loading-v9"></script>
   </body>
 </html>

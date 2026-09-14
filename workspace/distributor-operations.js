@@ -4416,13 +4416,30 @@
   }
 
   async function requestJSON(path, options = {}) {
-    const response = await fetch(path, { headers: { Accept: "application/json", "Content-Type": "application/json" }, ...options });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const detail = firstText(payload, ["detail", "message", "error"]) || `Request failed (${response.status})`;
-      const error = new Error(detail); error.status = response.status; throw error;
+    const method = text(options.method) ? text(options.method).toUpperCase() : "GET";
+    const controller = method === "GET" && path === API_PATH && typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = controller ? window.setTimeout(() => controller.abort(), 25000) : null;
+    try {
+      const response = await fetch(path, {
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        ...options,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      const payload = await response.json().catch(() => {
+        if (controller?.signal.aborted) throw new Error("Order data is taking too long. Retry.");
+        return {};
+      });
+      if (!response.ok) {
+        const detail = firstText(payload, ["detail", "message", "error"]) || `Request failed (${response.status})`;
+        const error = new Error(detail); error.status = response.status; throw error;
+      }
+      return payload;
+    } catch (error) {
+      if (controller?.signal.aborted) throw new Error("Order data is taking too long. Retry.");
+      throw error;
+    } finally {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
     }
-    return payload;
   }
 
   async function prepareEconomicProposal(candidateId) {
@@ -4493,6 +4510,12 @@
   async function refresh({ silent = false, periodic = false } = {}) {
     if (loading) { if (!periodic) refreshQueued = true; return null; }
     loading = true;
+    if (!projection) {
+      document.body.dataset.operationsState = "loading";
+      sourceState.hidden = true;
+      disabled.hidden = true;
+      content.hidden = true;
+    }
     if (!silent && !projection) setConnection("Connecting", "cyan");
     try {
       const payload = await requestJSON(API_PATH);

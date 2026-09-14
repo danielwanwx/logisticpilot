@@ -1260,3 +1260,72 @@ body.operations-shell[data-ops-view="agent"] #ops-hero-copy,
 body.operations-shell[data-ops-view="operations"] #ops-hero-copy {
   display: none;
 }
+
+/* Keep the first paint honest while the source-driven projection is loading. */
+body.operations-shell #ops-loading { display: none; }
+body.operations-shell[data-operations-state="loading"] #ops-loading {
+  display: block;
+  margin-bottom: 18px;
+}
+body.operations-shell[data-operations-state="loading"] #ops-hero-copy,
+body.operations-shell[data-operations-state="loading"] #ops-hero-investigate,
+body.operations-shell[data-operations-state="loading"] .ops-status-strip,
+body.operations-shell[data-operations-state="loading"] #ops-source-state,
+body.operations-shell[data-operations-state="loading"] #ops-disabled { display: none; }
+.ops-loading-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.52fr) minmax(300px, .68fr);
+  grid-template-areas: "flow events" "photos value" "benchmark benchmark";
+  gap: 18px;
+}
+.ops-loading-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 154px;
+  padding: 26px;
+  border: 1px solid var(--ops-line);
+  border-radius: 20px;
+  background: var(--ops-card);
+  box-shadow: var(--ops-shadow);
+}
+.ops-loading-flow,
+.ops-loading-events { min-height: 250px; }
+.ops-loading-flow { grid-area: flow; }
+.ops-loading-events { grid-area: events; }
+.ops-loading-photos { grid-area: photos; }
+.ops-loading-value {
+  grid-area: value;
+  border-color: var(--ops-green-deep);
+  background: var(--ops-green-deep);
+}
+.ops-loading-benchmark { grid-area: benchmark; }
+.ops-loading-line {
+  display: block;
+  width: 55%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e6eee8;
+}
+.ops-loading-line-kicker { width: 25%; height: 8px; background: #dbe7df; }
+.ops-loading-line-title { width: 42%; height: 18px; background: #d8e6dc; }
+.ops-loading-line-wide { width: 78%; }
+.ops-loading-photo {
+  display: block;
+  width: 100%;
+  min-height: 104px;
+  border-radius: 13px;
+  background: #e8efea;
+}
+.ops-loading-value .ops-loading-line { background: rgb(255 255 255 / .23); }
+.ops-loading-value .ops-loading-line-title { background: rgb(255 255 255 / .36); }
+@media (max-width: 840px) {
+  .ops-loading-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "flow" "events" "photos" "value" "benchmark";
+  }
+}
+@media (max-width: 580px) {
+  .ops-loading-card { padding: 20px; border-radius: 16px; }
+}
