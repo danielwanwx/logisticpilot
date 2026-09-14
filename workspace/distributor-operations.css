@@ -872,13 +872,35 @@ body.operations-shell .button-quiet { color: #415148; background: #fff; }
 .ops-approval-readback { padding: 10px; border-radius: 9px; color: #286e43; background: var(--ops-green-soft); }
 
 .ops-benchmark-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 15px; }
-.ops-benchmark-card { display: grid; gap: 5px; padding: 13px; border: 1px solid var(--ops-line); border-radius: 11px; background: #fafcfb; }
+.ops-benchmark-header-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.ops-benchmark-date-range { color: #718078; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ops-benchmark-card { display: grid; gap: 6px; min-width: 0; padding: 15px; border-radius: 11px; background: #fafcfb; }
 .ops-benchmark-card > span { color: #728077; font-size: 10px; font-weight: 680; }
-.ops-benchmark-card > strong { color: #2a3930; font-size: 18px; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
-.ops-benchmark-card > small,
-.ops-benchmark-note { color: #7b887f; font-size: 10px; line-height: 1.45; }
-.ops-benchmark-card progress { width: 100%; height: 5px; accent-color: #269a56; }
-.ops-benchmark-note { margin: 10px 0 0; }
+.ops-benchmark-card > strong { color: #2a3930; font-size: 22px; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+.ops-benchmark-card > small { color: #7b887f; font-size: 10px; line-height: 1.45; }
+.ops-benchmark-card .ops-benchmark-delta { color: #287b49; font-weight: 680; }
+.ops-benchmark-card .ops-benchmark-delta.is-unfavorable { color: #a56512; }
+.ops-benchmark-sparkline-wrap { display: grid; gap: 3px; margin-top: 5px; }
+.ops-benchmark-sparkline { display: block; width: 100%; height: 48px; overflow: visible; }
+.ops-benchmark-sparkline polyline { fill: none; stroke: #2d9b59; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.25; vector-effect: non-scaling-stroke; }
+.ops-benchmark-sparkline circle { fill: #fff; stroke: #2d9b59; stroke-width: 1.75; vector-effect: non-scaling-stroke; }
+.ops-benchmark-sparkline circle:last-of-type { fill: #2d9b59; }
+.ops-benchmark-sparkline-labels { display: flex; justify-content: space-between; color: #91a097; font-size: 9px; font-variant-numeric: tabular-nums; }
+.ops-benchmark-history { margin-top: 18px; }
+.ops-benchmark-table-wrap { overflow-x: auto; border-top: 1px solid var(--ops-line); }
+.ops-benchmark-table { width: 100%; min-width: 560px; border-collapse: collapse; color: #4b5b51; font-size: 10px; font-variant-numeric: tabular-nums; }
+.ops-benchmark-table th,
+.ops-benchmark-table td { padding: 9px 10px; border-bottom: 1px solid #edf1ee; text-align: left; white-space: nowrap; }
+.ops-benchmark-table th { color: #859189; font-size: 9px; font-weight: 720; letter-spacing: .065em; text-transform: uppercase; }
+.ops-benchmark-table td:first-child { color: #33443a; font-weight: 680; }
+.ops-benchmark-table td:not(:first-child) { color: #526258; }
+.ops-benchmark-current { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--ops-line); }
+.ops-benchmark-current-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ops-benchmark-current-header strong { color: #35463c; font-size: 12px; font-weight: 680; }
+.ops-benchmark-current-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.ops-benchmark-current-fact { display: grid; gap: 3px; min-width: 0; }
+.ops-benchmark-current-fact span { color: #859189; font-size: 9px; font-weight: 720; letter-spacing: .065em; text-transform: uppercase; }
+.ops-benchmark-current-fact strong { color: #425349; font-size: 12px; font-weight: 680; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
 .ops-details { margin-top: 18px; }
 .ops-details > .ops-panel,
@@ -1162,20 +1184,13 @@ body.operations-shell.has-evidence-drawer { overflow: hidden; }
 }
 
 /* Dashboard summaries stay quiet until the operator asks for the supporting detail. */
-.ops-economic-header[role="button"],
-#ops-benchmark-toggle { cursor: pointer; }
-.ops-economic-header[role="button"]:focus-visible,
-#ops-benchmark-toggle:focus-visible { outline: 3px solid rgb(55 174 96 / .16); outline-offset: 3px; }
-#ops-economic-toggle::after,
-#ops-benchmark-toggle::after { flex: 0 0 auto; margin-left: auto; color: #7b887f; font-size: 17px; line-height: 1; content: "⌄"; }
-#ops-economic-panel.is-expanded #ops-economic-toggle::after,
-#ops-benchmark-panel.is-expanded #ops-benchmark-toggle::after { content: "⌃"; }
-#ops-economic-panel:not(.is-expanded),
-#ops-benchmark-panel:not(.is-expanded) { padding: 0; }
-#ops-economic-panel:not(.is-expanded) > .ops-economic-header,
-#ops-benchmark-panel:not(.is-expanded) > .ops-panel-header { padding: 18px 26px; }
-#ops-economic-panel:not(.is-expanded) > :not(.ops-economic-header),
-#ops-benchmark-panel:not(.is-expanded) > :not(.ops-panel-header) { display: none; }
+.ops-economic-header[role="button"] { cursor: pointer; }
+.ops-economic-header[role="button"]:focus-visible { outline: 3px solid rgb(55 174 96 / .16); outline-offset: 3px; }
+#ops-economic-toggle::after { flex: 0 0 auto; margin-left: auto; color: #7b887f; font-size: 17px; line-height: 1; content: "⌄"; }
+#ops-economic-panel.is-expanded #ops-economic-toggle::after { content: "⌃"; }
+#ops-economic-panel:not(.is-expanded) { padding: 0; }
+#ops-economic-panel:not(.is-expanded) > .ops-economic-header { padding: 18px 26px; }
+#ops-economic-panel:not(.is-expanded) > :not(.ops-economic-header) { display: none; }
 body.operations-shell[data-ops-view="operations"] #ops-photo-history-content { display: none; }
 body.operations-shell[data-ops-view="operations"] #ops-photos-panel.is-expanded #ops-photo-history-content { display: block; }
 body.operations-shell[data-ops-view="operations"] #ops-photo-history-toggle { cursor: pointer; }
@@ -1327,5 +1342,9 @@ body.operations-shell[data-operations-state="loading"] #ops-disabled { display: 
   }
 }
 @media (max-width: 580px) {
+  .ops-benchmark-grid,
+  .ops-benchmark-current-facts { grid-template-columns: minmax(0, 1fr); }
+  .ops-benchmark-header-meta { justify-content: flex-start; }
+  .ops-benchmark-date-range { white-space: normal; }
   .ops-loading-card { padding: 20px; border-radius: 16px; }
 }

@@ -1020,6 +1020,137 @@
     };
   }
 
+  // Explicit synthetic fixture for the benchmark surface; it never enters the case projection.
+  const BENCHMARK_HISTORY = Object.freeze([
+    { week: "Jul 20", orders: 40, onTime: 32, receipts: 30, exceptions: 6, resolved: 5, totalResolutionMinutes: 450 },
+    { week: "Jul 27", orders: 44, onTime: 36, receipts: 32, exceptions: 7, resolved: 6, totalResolutionMinutes: 510 },
+    { week: "Aug 3", orders: 46, onTime: 39, receipts: 34, exceptions: 6, resolved: 5, totalResolutionMinutes: 425 },
+    { week: "Aug 10", orders: 48, onTime: 41, receipts: 36, exceptions: 7, resolved: 7, totalResolutionMinutes: 532 },
+    { week: "Aug 17", orders: 50, onTime: 44, receipts: 38, exceptions: 6, resolved: 6, totalResolutionMinutes: 432 },
+    { week: "Aug 24", orders: 52, onTime: 47, receipts: 40, exceptions: 6, resolved: 6, totalResolutionMinutes: 396 },
+    { week: "Aug 31", orders: 56, onTime: 51, receipts: 42, exceptions: 5, resolved: 5, totalResolutionMinutes: 305 },
+    { week: "Sep 7", orders: 60, onTime: 56, receipts: 44, exceptions: 5, resolved: 5, totalResolutionMinutes: 275 },
+  ]);
+
+  function benchmarkPercentage(numerator, denominator) {
+    return finite(numerator) && finite(denominator) && denominator > 0 ? numerator / denominator * 100 : null;
+  }
+  function benchmarkHistory() {
+    return BENCHMARK_HISTORY.map((week) => ({
+      ...week,
+      onTimeRate: benchmarkPercentage(week.onTime, week.orders),
+      exceptionRate: benchmarkPercentage(week.exceptions, week.receipts),
+      resolutionMinutes: week.resolved > 0 ? week.totalResolutionMinutes / week.resolved : null,
+    }));
+  }
+  function benchmarkPercent(value) { return finite(value) ? `${value.toFixed(1)}%` : "Unavailable"; }
+  function benchmarkDelta(value, previous, unit) {
+    if (!finite(value) || !finite(previous)) return "Unavailable";
+    const delta = Math.round((value - previous) * 10) / 10;
+    const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
+    return `${sign}${formatNumber(Math.abs(delta))}${unit}`;
+  }
+  function benchmarkSparkline(values, label) {
+    const wrap = document.createElement("div");
+    wrap.className = "ops-benchmark-sparkline-wrap";
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const start = BENCHMARK_HISTORY[0].week;
+    const end = BENCHMARK_HISTORY[BENCHMARK_HISTORY.length - 1].week;
+    const accessibleLabel = `${label} trend, weekly values from ${start} to ${end}, 8 points`;
+    svg.classList.add("ops-benchmark-sparkline");
+    svg.setAttribute("viewBox", "0 0 220 48");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", accessibleLabel);
+    svg.setAttribute("focusable", "false");
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = accessibleLabel;
+    svg.append(title);
+    const valid = values.filter(finite);
+    const min = Math.min(...valid);
+    const range = Math.max(...valid) - min || 1;
+    const points = values.map((value, index) => {
+      const x = 8 + index / (values.length - 1) * 204;
+      const y = 6 + 32 - ((value - min) / range) * 32;
+      return `${x},${y}`;
+    }).join(" ");
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    line.setAttribute("points", points);
+    svg.append(line);
+    values.forEach((value, index) => {
+      const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      point.setAttribute("cx", String(8 + index / (values.length - 1) * 204));
+      point.setAttribute("cy", String(6 + 32 - ((value - min) / range) * 32));
+      point.setAttribute("r", index === values.length - 1 ? "3" : "2.2");
+      svg.append(point);
+    });
+    const labels = document.createElement("div");
+    labels.className = "ops-benchmark-sparkline-labels";
+    const first = document.createElement("span"); first.textContent = start;
+    const last = document.createElement("span"); last.textContent = end;
+    labels.append(first, last);
+    wrap.append(svg, labels);
+    return wrap;
+  }
+  function benchmarkCard({ label, value, detail, delta, values, unfavorableChange = false }) {
+    const card = document.createElement("article");
+    card.className = "ops-benchmark-card";
+    const title = document.createElement("span"); title.textContent = label;
+    const latest = document.createElement("strong"); latest.textContent = value;
+    const detailNode = document.createElement("small"); detailNode.textContent = detail;
+    const deltaNode = document.createElement("small");
+    deltaNode.className = `ops-benchmark-delta${unfavorableChange ? " is-unfavorable" : ""}`;
+    deltaNode.textContent = `${delta} vs prior week`;
+    card.append(title, latest, detailNode, deltaNode, benchmarkSparkline(values, label));
+    return card;
+  }
+  function renderBenchmarkHistory(history) {
+    const body = $("ops-benchmark-history-body");
+    if (!body) return;
+    body.replaceChildren(...history.map((week) => {
+      const row = document.createElement("tr");
+      const values = [
+        week.week,
+        formatNumber(week.orders),
+        `${week.onTime}/${week.orders} (${benchmarkPercent(week.onTimeRate)})`,
+        `${week.exceptions}/${week.receipts} (${benchmarkPercent(week.exceptionRate)})`,
+        `${formatNumber(week.resolutionMinutes)} min`,
+      ];
+      values.forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); });
+      return row;
+    }));
+  }
+  function renderBenchmarkCurrent(next, benchmark) {
+    const state = $("ops-benchmark-current-state");
+    const facts = $("ops-benchmark-current-facts");
+    if (!state || !facts) return;
+    if (benchmark.status !== "CURRENT") {
+      state.className = "state-badge state-neutral";
+      state.textContent = "Unavailable";
+      facts.replaceChildren(...["Commitment", "Dispatch", "Confirmation"].map((label) => {
+        const fact = document.createElement("div"); fact.className = "ops-benchmark-current-fact";
+        const title = document.createElement("span"); title.textContent = label;
+        const value = document.createElement("strong"); value.textContent = "Unavailable";
+        fact.append(title, value); return fact;
+      }));
+      return;
+    }
+    const retained = isRetainedEvidence(next?.evidence_mode);
+    state.className = `state-badge ${retained ? "state-cyan" : "state-neutral"}`;
+    state.textContent = retained ? "Retained case" : "Current case";
+    const confirmationLabel = benchmark.synthetic ? "Carrier confirmation (Declared)" : "Delivery confirmation";
+    const values = [
+      ["Commitment", `${formatNumber(benchmark.target)} ${benchmark.unit}`],
+      ["Dispatch", `${formatNumber(benchmark.dispatched)} ${benchmark.unit}`],
+      [confirmationLabel, `${formatNumber(benchmark.confirmed)} ${benchmark.unit}`],
+    ];
+    facts.replaceChildren(...values.map(([label, value]) => {
+      const fact = document.createElement("div"); fact.className = "ops-benchmark-current-fact";
+      const title = document.createElement("span"); title.textContent = label;
+      const valueNode = document.createElement("strong"); valueNode.textContent = value;
+      fact.append(title, valueNode); return fact;
+    }));
+  }
+
   function alertStatus(alert) {
     return firstText(alert, ["status", "state"]).toUpperCase();
   }
@@ -2144,31 +2275,42 @@
 
   function renderBenchmark(next) {
     const benchmark = fulfillmentBenchmark(next);
-    const sourceLabel = erpEvidenceSourceLabel(next?.evidence_mode);
-    const retained = isRetainedEvidence(next?.evidence_mode);
     const grid = $("ops-benchmark-grid");
     const badge = $("ops-benchmark-state");
     if (!grid || !badge) return;
-    if (benchmark.status !== "CURRENT") {
-      badge.className = "state-badge state-neutral"; badge.textContent = "Comparison unavailable";
-      setText("ops-benchmark-note", "No comparison baseline is available for this case.");
-      grid.replaceChildren(emptyList("No comparison baseline available.")); return;
-    }
-    badge.className = "state-badge state-cyan"; badge.textContent = retained ? "Retained case only" : "Current case only";
-    const card = (label, actual, descriptor) => {
-      const node = document.createElement("article"); node.className = "ops-benchmark-card";
-      const title = document.createElement("span"); title.textContent = label;
-      const value = document.createElement("strong"); value.textContent = `${formatNumber(actual)} / ${formatNumber(benchmark.target)}`;
-      const note = document.createElement("small"); note.textContent = `${descriptor} · ${benchmark.unit}`;
-      const progress = document.createElement("progress"); progress.max = benchmark.target; progress.value = Math.min(actual, benchmark.target); progress.setAttribute("aria-label", `${label}: ${formatNumber(actual)} of ${formatNumber(benchmark.target)} ${benchmark.unit}`);
-      node.append(title, value, note, progress); return node;
-    };
+    const history = benchmarkHistory();
+    const latest = history[history.length - 1];
+    const previous = history[history.length - 2];
+    badge.className = "state-badge state-neutral";
+    badge.textContent = "Demo history";
     grid.replaceChildren(
-      card("Customer commitment", benchmark.target, `${benchmark.order_count} current order${benchmark.order_count === 1 ? "" : "s"}`),
-      card("Native dispatch", benchmark.dispatched, "Recorded dispatch"),
-      card(benchmark.synthetic ? "Carrier confirmation declared" : "Delivery confirmation recorded", benchmark.confirmed, benchmark.synthetic ? "Declared synthetic carrier confirmation; not independently verified receipt" : "Recorded event"),
+      benchmarkCard({
+        label: "On-time fulfillment",
+        value: benchmarkPercent(latest.onTimeRate),
+        detail: `${latest.onTime}/${latest.orders} orders`,
+        delta: benchmarkDelta(latest.onTimeRate, previous.onTimeRate, " pp"),
+        values: history.map((week) => week.onTimeRate),
+        unfavorableChange: latest.onTimeRate < previous.onTimeRate,
+      }),
+      benchmarkCard({
+        label: "Receiving exceptions",
+        value: benchmarkPercent(latest.exceptionRate),
+        detail: `${latest.exceptions}/${latest.receipts} receipts`,
+        delta: benchmarkDelta(latest.exceptionRate, previous.exceptionRate, " pp"),
+        values: history.map((week) => week.exceptionRate),
+        unfavorableChange: latest.exceptionRate > previous.exceptionRate,
+      }),
+      benchmarkCard({
+        label: "Average resolution time",
+        value: `${formatNumber(latest.resolutionMinutes)} min`,
+        detail: `${latest.resolved} resolved cases`,
+        delta: benchmarkDelta(latest.resolutionMinutes, previous.resolutionMinutes, " min"),
+        values: history.map((week) => week.resolutionMinutes),
+        unfavorableChange: latest.resolutionMinutes > previous.resolutionMinutes,
+      }),
     );
-    setText("ops-benchmark-note", `${sourceLabel} · Current case only. Historical comparison is unavailable.`);
+    renderBenchmarkHistory(history);
+    renderBenchmarkCurrent(next, benchmark);
   }
 
   function allocationPicked(next) {
@@ -4686,7 +4828,6 @@
     });
   });
   bindCollapsiblePanel("ops-economic-panel", "ops-economic-toggle");
-  bindCollapsiblePanel("ops-benchmark-panel", "ops-benchmark-toggle");
   bindCollapsiblePanel("ops-photos-panel", "ops-photo-history-toggle");
   function syncOpsViewFromLocation() {
     const target = text(window.location.hash).replace(/^#/, "");

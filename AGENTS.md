@@ -28,7 +28,11 @@
   `docs/design/approved-dashboard/dashboard-look-2.jpg`.
   The layout is journey and a compact KPI strip beside recent events, then a
   large receiving photo beside a deep-green impact card, followed by a visible,
-  expandable benchmark section. Preserve the three existing workspace views.
+  always-expanded benchmark section. Preserve the three existing workspace views.
+- Benchmark history is explicitly authorized to use consistent synthetic weekly
+  records and trend charts, with a concise visible `Demo history` label. Keep
+  these separate from current-order metrics read from the real backend; do not
+  imply the illustrative trend proves measured agent savings or improvements.
 - Feature work must fit that composition. Do not turn the product into an audit
   report, add walls of explanation, introduce nested outlined cards, or remove
   benchmark access. Keep generous spacing and concise product language.

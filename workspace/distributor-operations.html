@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/assets/phosphor-regular.css" />
     <link rel="stylesheet" href="/assets/phosphor-bold.css" />
     <link rel="stylesheet" href="/style.css?v=source-driven-final-v32" />
-    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-loading-v9" />
+    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-history-v10" />
     <title>LogisticPilot</title>
   </head>
   <body class="operations-shell" data-operations-state="loading" data-ops-view="dashboard">
@@ -240,12 +240,24 @@
           </section>
 
           <section id="ops-benchmark-panel" class="ops-panel ops-benchmark-panel" aria-labelledby="ops-benchmark-title">
-            <header id="ops-benchmark-toggle" class="ops-panel-header" role="button" tabindex="0" aria-expanded="false">
-              <div><span class="object-label">Case signal</span><h2 id="ops-benchmark-title">Benchmarks &amp; trends</h2></div>
-              <span id="ops-benchmark-state" class="state-badge state-neutral">Reading source</span>
+            <header class="ops-panel-header ops-benchmark-header">
+              <div><h2 id="ops-benchmark-title">Benchmarks &amp; trends</h2></div>
+              <div class="ops-benchmark-header-meta"><span id="ops-benchmark-state" class="state-badge state-neutral">Demo history</span><span class="ops-benchmark-date-range">Jul 20–Sep 13, 2026</span></div>
             </header>
             <div id="ops-benchmark-grid" class="ops-benchmark-grid" aria-live="polite"></div>
-            <p id="ops-benchmark-note" class="ops-benchmark-note">This comparison uses the accepted evidence source for one configured operation. Historical, industry, and savings baselines are unavailable.</p>
+            <div class="ops-benchmark-history">
+              <div class="ops-benchmark-table-wrap">
+                <table id="ops-benchmark-history-table" class="ops-benchmark-table">
+                  <caption class="sr-only">Demo history, weeks beginning Jul 20 to Sep 7, 2026</caption>
+                  <thead><tr><th scope="col">Week</th><th scope="col">Orders</th><th scope="col">On time</th><th scope="col">Exceptions</th><th scope="col">Resolution</th></tr></thead>
+                  <tbody id="ops-benchmark-history-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="ops-benchmark-current" aria-labelledby="ops-benchmark-current-title">
+              <div class="ops-benchmark-current-header"><strong id="ops-benchmark-current-title">Current order</strong><span id="ops-benchmark-current-state" class="state-badge state-neutral">Unavailable</span></div>
+              <div id="ops-benchmark-current-facts" class="ops-benchmark-current-facts" aria-live="polite"></div>
+            </div>
           </section>
         </div>
 
@@ -311,6 +323,6 @@
       <div id="ops-evidence-drawer-facts" class="ops-evidence-drawer-facts" aria-live="polite"></div>
       <button id="ops-evidence-drawer-open-operations" class="button button-primary" type="button">Open full operations evidence</button>
     </aside>
-    <script src="/distributor-operations.js?v=20260913-loading-v9"></script>
+    <script src="/distributor-operations.js?v=20260913-history-v10"></script>
   </body>
 </html>
