@@ -36,3 +36,11 @@ Remotion composition and reproducible commands belong in `video/architecture-pre
 - Source includes pinned Remotion dependencies, local narration and font assets, full Geist font license, and reproducible render commands. Rendered media and dependencies are excluded from Git.
 
 This delivers the standalone architecture segment for user review, not the complete competition film.
+
+## Playback correction
+
+The user subsequently reported a black preview. This was reproduced in the in-app browser on the direct MP4 page after playback ended: media reported ready and no error, but its displayed frame was black. The precise browser/compositor cause is unconfirmed.
+
+The corrected delivery uses `video/architecture-preview/preview.html`, copied to the local media folder as `index.html`. It has an actual-frame poster, an explicit play button, native playback controls and a direct download. The poster returns at the end instead of depending on the browser retaining its decoded final frame. The original MP4 remains intact; `architecture-preview-v1-compatible.mp4` is H.264, limited-range BT.709 `yuv420p`, AAC, with fast-start metadata.
+
+Primary acceptance: complete FFmpeg decode passed; real in-app playback reached 23.381 seconds with `ended=true`, no media error and the poster visible. Initial, playing and ended states were visually checked. User-facing preview: `http://127.0.0.1:3941/index.html`.
