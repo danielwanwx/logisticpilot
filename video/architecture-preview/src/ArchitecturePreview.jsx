@@ -512,8 +512,7 @@ const Caption = ({frame}) => {
   );
 };
 
-export const ArchitecturePreview = () => {
-  const frame = useCurrentFrame();
+export const ArchitectureDiagram = ({frame, showCaptions = true}) => {
   const titleIn = progress(frame, 0, 22);
   const topLine = progress(frame, 12, 42);
   const stations = [
@@ -524,16 +523,7 @@ export const ArchitecturePreview = () => {
   ];
 
   return (
-    <AbsoluteFill
-      style={{
-        background: palette.canvas,
-        color: palette.ink,
-        fontFamily: 'Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        overflow: 'hidden',
-      }}
-    >
-      <style>{`@font-face { font-family: "Geist"; src: url("${staticFile('geist-latin.woff2')}") format("woff2"); font-style: normal; font-weight: 100 900; font-display: block; }`}</style>
-      <Audio src={staticFile('narration.mp3')} />
+    <>
       <div
         style={{
           alignItems: 'center',
@@ -629,7 +619,26 @@ export const ArchitecturePreview = () => {
         ))}
       </div>
       <ResultPanel frame={frame} />
-      <Caption frame={frame} />
+      {showCaptions ? <Caption frame={frame} /> : null}
+    </>
+  );
+};
+
+export const ArchitecturePreview = () => {
+  const frame = useCurrentFrame();
+
+  return (
+    <AbsoluteFill
+      style={{
+        background: palette.canvas,
+        color: palette.ink,
+        fontFamily: 'Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        overflow: 'hidden',
+      }}
+    >
+      <style>{`@font-face { font-family: "Geist"; src: url("${staticFile('geist-latin.woff2')}") format("woff2"); font-style: normal; font-weight: 100 900; font-display: block; }`}</style>
+      <Audio src={staticFile('narration.mp3')} />
+      <ArchitectureDiagram frame={frame} />
     </AbsoluteFill>
   );
 };
