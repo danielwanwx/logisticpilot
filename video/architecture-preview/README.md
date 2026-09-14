@@ -33,13 +33,13 @@ time-compressed with the pitch-preserving FFmpeg filter
 The latest rendered review MP4 is
 `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3.mp4`
 with SHA-256
-`146eef143a71f6879c00bbeb78499426981726cb94953d5217da860a7d8d11ff`.
+`28685cacb3e9d5c019f634c1c2107daaf90f910448bcd9c1a76780b00a9f6356`.
 Its container duration is 47.018667 seconds; the video is H.264 High,
 1920 × 1080, yuv420p limited-range BT.709 at 30 fps, with AAC audio at 48 kHz
 stereo. The matching poster is
 `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3-poster.jpg`
 with SHA-256
-`eb4f8733ab88d33074436c0a5cd4c74b1997acf0c732a0c8a0cdeaf1ec40bcda`.
+`470cc2034f37334cbd5bf195c8ef9f208cd4a2c33d5114f355183a35036811c4`.
 
 The interactive preview uses the actual `@remotion/player` composition
 rendered as DOM/SVG with the bundled audio; the MP4 remains the downloadable
@@ -47,6 +47,9 @@ film artifact. Browser acceptance reached readyState 4 with audio unmuted and
 currentTime advancing. The no-line first scene and the evidence distribution
 spine were visually checked in rendered stills. Full live footage remains a
 separate capture task and has not yet been recorded.
+
+The interactive shell owns the sole LogisticPilot brand and the `Architecture`
+section label; duplicate composition corner chrome was removed.
 
 Accepted V3 review stills:
 

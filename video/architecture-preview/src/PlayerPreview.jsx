@@ -50,7 +50,7 @@ export const PlayerPreview = () => {
             <span className="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
             <span>LogisticPilot</span>
           </div>
-          <span className="meta">Opening + architecture</span>
+          <span className="meta">Architecture</span>
         </header>
         <section className="player-card" aria-label="Interactive opening and architecture preview">
           <div className="player-frame">

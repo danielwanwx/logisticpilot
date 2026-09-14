@@ -61,29 +61,6 @@ const springIn = (frame, start, duration = 24) => {
   );
 };
 
-const Logo = ({opacity = 1}) => (
-  <div style={{alignItems: 'center', display: 'flex', gap: 12, opacity}}>
-    <div
-      style={{
-        alignItems: 'center',
-        background: palette.ink,
-        borderRadius: 11,
-        display: 'flex',
-        height: 38,
-        justifyContent: 'center',
-        width: 38,
-      }}
-    >
-      <div style={{display: 'grid', gap: 3, gridTemplateColumns: 'repeat(2, 5px)'}}>
-        {[0, 1, 2, 3].map((dot) => (
-          <span key={dot} style={{background: '#92E0BD', borderRadius: 50, height: 5, width: 5}} />
-        ))}
-      </div>
-    </div>
-    <span style={{fontSize: 22, fontWeight: 650, letterSpacing: '-0.025em'}}>LogisticPilot</span>
-  </div>
-);
-
 const Eyebrow = ({children}) => (
   <div
     style={{
@@ -443,38 +420,9 @@ const Opening = ({frame}) => {
   const question = sceneOpacity(frame, timeline.question.from, timeline.question.to);
   const promise = sceneOpacity(frame, timeline.promise.from, timeline.promise.to);
   const handoff = sceneOpacity(frame, timeline.handoff.from, timeline.handoff.to, 10, 12);
-  const brandOpacity = 1 - progress(frame, timeline.architecture.from - 16, timeline.architecture.from + 12);
 
   return (
     <AbsoluteFill>
-      <div
-        style={{
-          alignItems: 'center',
-          display: 'flex',
-          justifyContent: 'space-between',
-          left: 82,
-          position: 'absolute',
-          right: 82,
-          top: 58,
-        }}
-      >
-        <Logo opacity={brandOpacity} />
-        <div
-          style={{
-            border: '1px solid ' + palette.line,
-            borderRadius: 999,
-            color: palette.muted,
-            fontSize: 14,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            opacity: brandOpacity,
-            padding: '10px 14px',
-          }}
-        >
-          RECEIVING DECISIONS
-        </div>
-      </div>
-
       <OperatorScene frame={frame} opacity={intro} />
       <ExceptionScene frame={frame} opacity={question} />
       <EvidenceScene frame={frame} opacity={promise} />

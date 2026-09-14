@@ -46,7 +46,7 @@ The first-person voice asset is complete. Full live footage and a fresh same-cas
 
 ## Opening preview delivery
 
-The rendered `OpeningArchitectureV2` composition is 1410 frames at 30 fps, 1920 × 1080. The latest MP4 is `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3.mp4` with SHA-256 `146eef143a71f6879c00bbeb78499426981726cb94953d5217da860a7d8d11ff`. Its container duration is 47.018667 seconds; it is H.264 High, `yuv420p` limited-range BT.709 at 30 fps with AAC audio at 48 kHz stereo. The matching poster is `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3-poster.jpg` with SHA-256 `eb4f8733ab88d33074436c0a5cd4c74b1997acf0c732a0c8a0cdeaf1ec40bcda`.
+The rendered `OpeningArchitectureV2` composition is 1410 frames at 30 fps, 1920 × 1080. The latest MP4 is `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3.mp4` with SHA-256 `28685cacb3e9d5c019f634c1c2107daaf90f910448bcd9c1a76780b00a9f6356`. Its container duration is 47.018667 seconds; it is H.264 High, `yuv420p` limited-range BT.709 at 30 fps with AAC audio at 48 kHz stereo. The matching poster is `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3-poster.jpg` with SHA-256 `470cc2034f37334cbd5bf195c8ef9f208cd4a2c33d5114f355183a35036811c4`.
 
 The primary reviewer inspected the actual source diff and rendered context, architecture and goal frames. The first scene's no-line card composition and the evidence scene's clean distribution spine were visually checked. The promised multi-app demonstration remains a requirement for the full film. The primary reviewer also independently checked MP4 metadata and decoded the complete file without errors.
 
