@@ -13,12 +13,17 @@
     "render:v2": "remotion render src/index.jsx OpeningArchitectureV2 out/opening-architecture-v2.mp4 --codec=h264 --pixel-format=yuv420p --crf=17 --concurrency=2 --overwrite",
     "still:v2:intro": "remotion still src/index.jsx OpeningArchitectureV2 out/stills/v2-01-context.png --frame=120 --image-format=png --overwrite",
     "still:v2:architecture": "remotion still src/index.jsx OpeningArchitectureV2 out/stills/v2-02-architecture.png --frame=815 --image-format=png --overwrite",
-    "still:v2:goal": "remotion still src/index.jsx OpeningArchitectureV2 out/stills/v2-03-goal.png --frame=1300 --image-format=png --overwrite"
+    "still:v2:goal": "remotion still src/index.jsx OpeningArchitectureV2 out/stills/v2-03-goal.png --frame=1300 --image-format=png --overwrite",
+    "build:player-preview": "node scripts/build-player-preview.mjs"
   },
   "dependencies": {
     "@remotion/cli": "4.0.524",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "remotion": "4.0.524"
+  },
+  "devDependencies": {
+    "@remotion/player": "4.0.524",
+    "esbuild": "0.28.1"
   }
 }

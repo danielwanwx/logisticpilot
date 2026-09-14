@@ -4,7 +4,7 @@ The presenter speaks as the builder of LogisticPilot. Start with the operator's 
 
 ## Opening narration
 
-I built LogisticPilot for small parts distributors, where one person may handle receiving, inspections, and customer orders. When five parts look questionable, should all twenty-five have to wait?
+I built LogisticPilot for small businesses, where one person may handle receiving, inspections, and customer orders. When five parts look questionable, should all twenty-five have to wait?
 
 I'll show you how I upload a photo, ask the agent what can move, and verify the result in the connected apps.
 
@@ -16,7 +16,11 @@ This is a standalone opening/architecture preview. The full film may place the a
 
 ## Voice source
 
-Generated in the signed-in ElevenLabs page using Christopher — Tender, Kind and Steady, Eleven v3, Generation 1. Downloaded through Chrome's Save dialog to `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-elevenlabs-v2.mp3`. Reported duration: 45.087313 seconds, MP3 44.1 kHz mono. Complete FFmpeg decode passed. The first-person script above is the exact submitted text; no voice cloning was used.
+Generated in the signed-in ElevenLabs page using Evan (voice ID `TWutjvRaJqAX89preB4e`), Eleven v3, Generation 2. The selected source download has SHA-256 `e342bf33b788c08720b656fa1f24a908db23a621412006d3b87989751ce713da`. It was time-compressed with the pitch-preserving FFmpeg filter `atempo=1.10081133`; bundled `public/narration-v2.mp3` is 45.095215 seconds, 44.1 kHz mono MP3 at 128 kbps with SHA-256 `575b1695ad18a036068bef0c2d9b10ffffe63972966204b4451840bb4e5d32e7`. Complete FFmpeg decode passed. The first-person script above is the exact submitted text; no voice cloning was used.
+
+## V1 architecture voice provenance
+
+The earlier V1 architecture preview separately uses Christopher — Tender, Kind and Steady, Eleven v3, Generation 1. Its source remains `/Users/danielwan/Documents/LogisticPilot-media/architecture-voiceover-elevenlabs-v1.mp3`; the bundled `public/narration.mp3` and `architecture-preview-v1.mp4` are retained as the V1 reference artifacts.
 
 ## Required live footage
 
@@ -42,10 +46,8 @@ The first-person voice asset is complete. Full live footage and a fresh same-cas
 
 ## Opening preview delivery
 
-The rendered `OpeningArchitectureV2` composition is 1410 frames at 30 fps, 1920 × 1080. The MP4 container is 47.061333 seconds with H.264 `yuv420p`, limited-range BT.709 and AAC audio. It is saved as `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v2.mp4`; the supplied narration and bundled `public/narration-v2.mp3` have identical SHA-256 hashes.
+The rendered `OpeningArchitectureV2` composition is 1410 frames at 30 fps, 1920 × 1080. The latest MP4 is `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3.mp4` with SHA-256 `146eef143a71f6879c00bbeb78499426981726cb94953d5217da860a7d8d11ff`. Its container duration is 47.018667 seconds; it is H.264 High, `yuv420p` limited-range BT.709 at 30 fps with AAC audio at 48 kHz stereo. The matching poster is `/Users/danielwan/Documents/LogisticPilot-media/opening-architecture-v3-poster.jpg` with SHA-256 `eb4f8733ab88d33074436c0a5cd4c74b1997acf0c732a0c8a0cdeaf1ec40bcda`.
 
-The primary reviewer inspected the actual source diff and rendered context, architecture and goal frames. The independent award reviewer found no material truth or clarity blocker in the first-person script; the promised multi-app demonstration remains a requirement for the full film. The primary reviewer also independently checked MP4 metadata and decoded the complete file without errors.
+The primary reviewer inspected the actual source diff and rendered context, architecture and goal frames. The first scene's no-line card composition and the evidence scene's clean distribution spine were visually checked. The promised multi-app demonstration remains a requirement for the full film. The primary reviewer also independently checked MP4 metadata and decoded the complete file without errors.
 
-The user-facing player is `http://127.0.0.1:3941/opening-preview.html`, served from the local media folder. It uses an actual rendered poster, explicit playback, native controls and a download link. Browser playback is checked in the same in-app browser where the earlier direct-MP4 black frame was reproduced.
-
-Actual playback reached 47.061333 seconds with `ended=true`, audio unmuted, no media error and the poster visible. The initial poster, playing goal frame and final poster were inspected. Final visual approval remains with the user.
+The user-facing preview is `http://127.0.0.1:3941/opening-preview.html`, served from the local media folder and redirected to the Remotion Player build. It uses the actual `@remotion/player` composition rendered as DOM/SVG with the bundled audio; the MP4 remains the download artifact. Browser acceptance reached readyState 4 with audio unmuted and currentTime advancing. Full live footage remains a separate capture task and has not yet been recorded. Final visual approval remains with the user.
