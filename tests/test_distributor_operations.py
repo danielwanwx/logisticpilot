@@ -33,6 +33,7 @@ from the_missing_20.adapters.strands_models import (
     BedrockNovaProFactory,
     BedrockOpus46Factory,
 )
+from the_missing_20.agents.distributor_economics import SPLIT20_CANDIDATE_ID
 from the_missing_20.config import Settings
 from the_missing_20.ports.agent_model import AgentProvider
 
@@ -3444,3 +3445,294 @@ def test_pending_contract_reselection_keeps_origin_alert_open_when_prepare_is_bl
         == result
     )
     assert [kind for kind, _event_id, _operation in bridge.calls] == ["prepare_pick"]
+
+
+def test_assist_returns_missing_information_without_erp_mutation(tmp_path: Path) -> None:
+    service, bridge = _service(tmp_path)
+    service._assist_turn = lambda _question, _projection: {
+        "status": "COMPLETE",
+        "answer": "Please provide the lot and the measured quantity.",
+        "missing_information": [
+            {"field": "lot", "prompt": "Which current lot does this refer to?"},
+            {"field": "measured", "prompt": "What measurement did you observe?"},
+        ],
+        "physical_draft": None,
+        "photo_analysis": None,
+        "intent": "NONE",
+    }
+
+    result = service.assist("Can you check the incoming material?")
+
+    assistant = cast(Mapping[str, object], result["assistant"])
+    assert assistant["status"] == "COMPLETE"
+    assert assistant["missing_information"] == [
+        {"field": "lot", "prompt": "Which current lot does this refer to?"},
+        {"field": "measured", "prompt": "What measurement did you observe?"},
+    ]
+    assert assistant["preparation"] == {"status": "NOT_REQUESTED"}
+    assert bridge.calls == []
+    assert result.get("prepared_proposal") is None
+
+
+def test_assist_prepares_natural_language_inspection_without_erp_mutation(tmp_path: Path) -> None:
+    service, bridge = _service(tmp_path)
+    service.record_event(_arrival("seed-arrival", lot="LOT-A", cartons=2, observed=20))
+    bridge.calls.clear()
+
+    def assist_turn(_question: str, projection: Mapping[str, object]) -> Mapping[str, object]:
+        context = cast(Mapping[str, object], projection["_assist_context"])
+        turn_id = cast(str, context["current_user_turn_id"])
+        return {
+            "status": "COMPLETE",
+            "answer": "I prepared the inspection for manager confirmation.",
+            "missing_information": [],
+            "physical_draft": {
+                "event": {
+                    "type": "inspection",
+                    "lot": "LOT-A",
+                    "result": "FAIL",
+                    "scope": "WHOLE_LOT",
+                    "metric": "diameter_mm",
+                    "measured": 10.0,
+                    "sample_quantity": 20,
+                },
+                "user_field_citations": [
+                    {"field": "lot", "value": "LOT-A", "user_turn_id": turn_id},
+                    {"field": "scope", "value": "WHOLE_LOT", "user_turn_id": turn_id},
+                    {"field": "metric", "value": "diameter_mm", "user_turn_id": turn_id},
+                    {"field": "measured", "value": 10, "user_turn_id": turn_id},
+                    {"field": "sample_quantity", "value": 20, "user_turn_id": turn_id},
+                ],
+                "prepare_requested": True,
+            },
+            "photo_analysis": None,
+            "intent": "NONE",
+        }
+
+    service._assist_turn = assist_turn
+    result = service.assist(
+        "Prepare this inspection: LOT-A diameter measured 10 mm across the entire lot, "
+        "with a sample quantity of 20."
+    )
+
+    assistant = cast(Mapping[str, object], result["assistant"])
+    draft = cast(Mapping[str, object], assistant["action_draft"])
+    event = cast(Mapping[str, object], draft["event"])
+    assert event["result"] == "PASS"
+    assert assistant["preparation"] == {
+        "status": "READY_FOR_CONFIRMATION",
+        "reason": "PREPARED_OPERATOR_DECLARATION",
+    }
+    assert cast(Mapping[str, object], result["prepared_proposal"])["status"] == (
+        "PENDING_MANAGER_APPROVAL"
+    )
+    assert bridge.calls == []
+
+
+def test_assist_rejects_embedded_numeric_citation_without_preparing(tmp_path: Path) -> None:
+    service, bridge = _service(tmp_path)
+
+    def assist_turn(_question: str, projection: Mapping[str, object]) -> Mapping[str, object]:
+        context = cast(Mapping[str, object], projection["_assist_context"])
+        turn_id = cast(str, context["current_user_turn_id"])
+        return {
+            "status": "COMPLETE",
+            "answer": "I found an arrival draft.",
+            "missing_information": [],
+            "physical_draft": {
+                "event": {
+                    "type": "arrival",
+                    "lot": "LOT-A",
+                    "cartons": 5,
+                    "observed_stock_quantity": 5,
+                },
+                "user_field_citations": [
+                    {"field": "lot", "value": "LOT-A", "user_turn_id": turn_id},
+                    {"field": "cartons", "value": 5, "user_turn_id": turn_id},
+                    {"field": "observed_stock_quantity", "value": 5, "user_turn_id": turn_id},
+                ],
+                "prepare_requested": True,
+            },
+            "photo_analysis": None,
+            "intent": "NONE",
+        }
+
+    service._assist_turn = assist_turn
+    result = service.assist("Prepare LOT-A from bay B5; it has 25 cartons and 25 observed units.")
+
+    assistant = cast(Mapping[str, object], result["assistant"])
+    assert assistant["preparation"] == {
+        "status": "BLOCKED",
+        "reason": "USER_DECLARATION_REQUIRED:cartons",
+    }
+    assert bridge.calls == []
+    assert result.get("prepared_proposal") is None
+
+
+def test_assist_blocks_a_physical_draft_when_source_changes_after_model_read(
+    tmp_path: Path,
+) -> None:
+    service, bridge = _service(tmp_path)
+
+    def assist_turn(_question: str, projection: Mapping[str, object]) -> Mapping[str, object]:
+        context = cast(Mapping[str, object], projection["_assist_context"])
+        turn_id = cast(str, context["current_user_turn_id"])
+        changed = cast(dict[str, object], bridge.read_case(bridge.config))
+        changed["source_revision"] = "changed-after-assistant-read"
+        bridge.source_override = changed
+        return {
+            "status": "COMPLETE",
+            "answer": "I found an arrival draft.",
+            "missing_information": [],
+            "physical_draft": {
+                "event": {
+                    "type": "arrival",
+                    "lot": "LOT-A",
+                    "cartons": 2,
+                    "observed_stock_quantity": 20,
+                },
+                "user_field_citations": [
+                    {"field": "lot", "value": "LOT-A", "user_turn_id": turn_id},
+                    {"field": "cartons", "value": 2, "user_turn_id": turn_id},
+                    {"field": "observed_stock_quantity", "value": 20, "user_turn_id": turn_id},
+                ],
+                "prepare_requested": True,
+            },
+            "photo_analysis": None,
+            "intent": "NONE",
+        }
+
+    service._assist_turn = assist_turn
+    result = service.assist("Prepare LOT-A with 2 cartons and observed stock quantity 20.")
+
+    assistant = cast(Mapping[str, object], result["assistant"])
+    assert assistant["preparation"] == {
+        "status": "BLOCKED",
+        "reason": "SOURCE_CHANGED_AFTER_ASSISTANT_READ",
+    }
+    assert bridge.calls == []
+    assert result.get("prepared_proposal") is None
+
+
+def test_assist_keeps_an_old_pending_proposal_blocked_when_the_economic_gate_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, bridge = _service(tmp_path)
+    old_proposal = {
+        "proposal_id": "old-pending-proposal",
+        "source": "ECONOMIC_RECOMMENDATION",
+        "event": {"event_id": "old-event"},
+        "status": "PENDING_MANAGER_APPROVAL",
+    }
+    current_projection = service.projection()
+
+    def blocked_prepare(_request: Mapping[str, object]) -> Mapping[str, object]:
+        return {
+            "economic_proposal": {
+                "requested_candidate_id": SPLIT20_CANDIDATE_ID,
+                "gate": {"allowed": False, "reasons": ["USABLE_STOCK_TOO_LOW"]},
+            },
+            "prepared_proposal": old_proposal,
+            "projection": {**current_projection, "prepared_proposal": old_proposal},
+        }
+
+    monkeypatch.setattr(service, "prepare_economic_proposal", blocked_prepare)
+    service._assist_turn = lambda _question, _projection: {
+        "status": "COMPLETE",
+        "answer": "I checked the cleared-twenty option.",
+        "missing_information": [],
+        "physical_draft": None,
+        "photo_analysis": None,
+        "intent": "PREPARE_ECONOMIC_SPLIT20",
+    }
+
+    result = service.assist("Prepare the cleared-twenty allocation.")
+
+    assistant = cast(Mapping[str, object], result["assistant"])
+    assert assistant["preparation"] == {
+        "status": "BLOCKED",
+        "reason": ["USABLE_STOCK_TOO_LOW"],
+    }
+    assert "action_draft" not in assistant
+    assert bridge.calls == []
+
+
+def test_assist_uses_the_existing_photo_reader_only_after_a_cited_lot(tmp_path: Path) -> None:
+    config = _component_config()
+    bridge = _Bridge(config)
+    reader_calls: list[bytes] = []
+
+    def reader(image: bytes) -> Mapping[str, object]:
+        reader_calls.append(image)
+        return _photo_reader_result(lot="LOT-B")
+
+    def assist_turn(question: str, projection: Mapping[str, object]) -> Mapping[str, object]:
+        context = cast(Mapping[str, object], projection["_assist_context"])
+        turn_id = cast(str, context["current_user_turn_id"])
+        cited = "LOT-B" in question
+        return {
+            "status": "COMPLETE",
+            "answer": "I will analyze the attached photo.",
+            "missing_information": [],
+            "physical_draft": None,
+            "photo_analysis": {
+                "lot": "LOT-B",
+                "purpose": "overview",
+                **(
+                    {"lot_citation": {"field": "lot", "value": "LOT-B", "user_turn_id": turn_id}}
+                    if cited
+                    else {}
+                ),
+            },
+            "intent": "NONE",
+        }
+
+    service = DistributorOperations(
+        tmp_path / "assist-photo.sqlite3",
+        config,
+        bridge,
+        assist_turn=assist_turn,
+        photo_reader=reader,
+    )
+    bridge.state_provider = service._latest_state
+    image = _photo_png(color=(20, 170, 20))
+    service.attach_photo(
+        {
+            "attachment_id": "assist-photo",
+            "media_type": "image/png",
+            "image": base64.b64encode(image).decode("ascii"),
+        }
+    )
+
+    missing_lot = service.assist(
+        "Check the condition of the attached photo.", photo_attachment_id="assist-photo"
+    )
+    missing_assistant = cast(Mapping[str, object], missing_lot["assistant"])
+    assert missing_assistant["status"] == "COMPLETE"
+    assert missing_assistant["answer"] == "Which lot does this photo belong to?"
+    assert missing_assistant["missing_information"] == [
+        {
+            "field": "lot",
+            "prompt": (
+                "Which current lot does this photo belong to? Choose one: LOT-A, LOT-B, LOT-C."
+            ),
+        }
+    ]
+    assert missing_assistant["preparation"] == {
+        "status": "NOT_REQUESTED",
+        "reason": "LOT_REQUIRED_FOR_PHOTO_ANALYSIS",
+    }
+    assert reader_calls == []
+
+    analyzed = service.assist(
+        "LOT-B, check the attached photo condition.", photo_attachment_id="assist-photo"
+    )
+    assistant = cast(Mapping[str, object], analyzed["assistant"])
+    photo_result = cast(Mapping[str, object], assistant["photo_analysis"])
+    assert assistant["status"] == "COMPLETE"
+    assert assistant["preparation"] == {"status": "PHOTO_ANALYZED"}
+    assert photo_result["status"] == "COMPLETE"
+    assert photo_result["lot"] == "LOT-B"
+    assert len(reader_calls) == 1
+    assert reader_calls[0].startswith(b"\xff\xd8")
+    assert bridge.calls == []

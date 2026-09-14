@@ -107,6 +107,9 @@ from the_missing_20.agents.distributor_allocation import (  # noqa: E402
 from the_missing_20.agents.distributor_economics import (  # noqa: E402
     select_economic_candidate,
 )
+from the_missing_20.agents.distributor_operations_assistant import (  # noqa: E402
+    assist_distributor_operations,
+)
 from the_missing_20.agents.photo_receiving import StrandsPhotoReader  # noqa: E402
 from the_missing_20.agents.product_language import (  # noqa: E402
     ProductLanguageViolation,
@@ -1476,6 +1479,51 @@ def _distributor_native_ask_turn(
     return ask
 
 
+def _distributor_native_assist_turn(
+    *,
+    settings: Settings,
+    configured_model: object | None = None,
+    factory: AgentModelFactory | None = None,
+) -> Callable[[str, Mapping[str, object]], Mapping[str, object]]:
+    """Build the configured real structured assistant without a model fallback."""
+
+    if factory is not None and configured_model is not None:
+        raise ValueError("distributor assist accepts a factory or a model selection, not both")
+
+    def assist(question: str, projection: Mapping[str, object]) -> Mapping[str, object]:
+        if projection.get("available") is not True or projection.get("live_source") is not True:
+            return {
+                "status": "UNAVAILABLE",
+                "reason": "SOURCE_UNAVAILABLE",
+                "answer": "Current ERP evidence is unavailable; no action was prepared.",
+                "missing_information": [],
+            }
+        try:
+            selected_factory = factory or _distributor_model_factory(
+                settings=settings, configured_model=configured_model
+            )
+            return assist_distributor_operations(
+                question=question,
+                projection=projection,
+                factory=selected_factory,
+            )
+        except (
+            BotoCoreError,
+            ClientError,
+            TimeoutError,
+        ) as error:
+            return _distributor_model_unavailable(error)
+        except (OSError, ProductLanguageViolation, ValueError) as error:
+            return {
+                "status": "UNAVAILABLE",
+                "reason": f"MODEL_UNAVAILABLE:{type(error).__name__}",
+                "answer": "The operations assistant is unavailable; no action was prepared.",
+                "missing_information": [],
+            }
+
+    return assist
+
+
 class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
     """Read-only legacy adapter plus the local experiment API."""
 
@@ -2250,6 +2298,26 @@ class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
                     )
                 result = operations.ask(question)
                 should_sync = False
+            elif action == "assist":
+                question = payload.get("question")
+                photo_attachment_id = payload.get("photo_attachment_id")
+                if (
+                    set(payload) - {"question", "photo_attachment_id"}
+                    or not isinstance(question, str)
+                    or (
+                        photo_attachment_id is not None and not isinstance(photo_attachment_id, str)
+                    )
+                ):
+                    raise APIRequestError(
+                        HTTPStatus.BAD_REQUEST,
+                        "invalid_distributor_operations_request",
+                        "assist accepts a question and optional photo_attachment_id",
+                    )
+                result = operations.assist(
+                    question,
+                    photo_attachment_id=photo_attachment_id,
+                )
+                should_sync = False
             else:
                 raise APIRequestError(
                     HTTPStatus.NOT_FOUND,
@@ -2726,6 +2794,7 @@ class DecisionWorkspaceHandler(BaseHTTPRequestHandler):
             "/api/v1/distributor-operations/reconcile-receive",
             "/api/v1/distributor-operations/reselect-pending-allocation",
             "/api/v1/distributor-operations/ask",
+            "/api/v1/distributor-operations/assist",
         }
         if route not in allowed_routes and not route.startswith("/api/v1/incidents/"):
             self._method_not_allowed("GET")
@@ -2980,6 +3049,15 @@ class DecisionWorkspaceServer(ThreadingHTTPServer):
                 and distributor_settings.agent_provider is AgentProvider.BEDROCK
                 else None
             )
+            distributor_assist_turn = (
+                _distributor_native_assist_turn(
+                    settings=distributor_settings,
+                    configured_model=distributor_model_selection,
+                )
+                if photo_values.get("MISSING20_NATIVE_RECEIVING_DIALOGUE") == "1"
+                and distributor_settings.agent_provider is AgentProvider.BEDROCK
+                else None
+            )
             distributor_allocation_selector = (
                 _distributor_native_allocation_selector(
                     settings=distributor_settings,
@@ -3024,6 +3102,7 @@ class DecisionWorkspaceServer(ThreadingHTTPServer):
                 raw_operations_config,
                 native_adapter,
                 ask_turn=distributor_ask_turn,
+                assist_turn=distributor_assist_turn,
                 allocation_selector=distributor_allocation_selector,
                 economic_selector=distributor_economic_selector,
                 photo_reader=(

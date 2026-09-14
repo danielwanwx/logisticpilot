@@ -12,6 +12,7 @@ import base64
 import binascii
 import json
 import math
+import re
 import sqlite3
 from collections.abc import Callable, Mapping
 from contextlib import suppress
@@ -47,6 +48,10 @@ from the_missing_20.agents.photo_receiving import (
     PhotoLabelAssessment,
     PhotoPurpose,
     normalize_photo,
+)
+from the_missing_20.agents.product_language import (
+    ProductLanguageViolation,
+    english_product_text,
 )
 
 DISTRIBUTOR_OPERATIONS_SCHEMA_VERSION = "missing20-distributor-operations/v1"
@@ -259,6 +264,7 @@ class DistributorOperations:
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         ask_turn: Callable[[str, Mapping[str, object]], Mapping[str, object]] | None = None,
+        assist_turn: Callable[[str, Mapping[str, object]], Mapping[str, object]] | None = None,
         allocation_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
         economic_selector: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
         photo_reader: Callable[..., Mapping[str, object]] | None = None,
@@ -268,6 +274,7 @@ class DistributorOperations:
         self._erp = erp
         self._clock = clock
         self._ask_turn = ask_turn
+        self._assist_turn = assist_turn
         self._allocation_selector = allocation_selector
         self._economic_selector = economic_selector
         self._photo_reader = photo_reader
@@ -307,6 +314,11 @@ class DistributorOperations:
             self._db.execute(
                 "ALTER TABLE distributor_operation_attachments ADD COLUMN analysis_json TEXT"
             )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS distributor_operation_assist_turns "
+            "(turn_id TEXT PRIMARY KEY, case_id TEXT NOT NULL, question TEXT NOT NULL, "
+            "response_json TEXT NOT NULL, source_revision TEXT NOT NULL, recorded_at TEXT NOT NULL)"
+        )
         self._lock = RLock()
 
     @property
@@ -735,7 +747,14 @@ class DistributorOperations:
         """Store a non-mutating, source-fresh proposal for manager review."""
 
         self._require_live_operations()
-        allowed = {"proposal_id", "case_id", "event", "source", "photo_attachment_id"}
+        allowed = {
+            "proposal_id",
+            "case_id",
+            "event",
+            "source",
+            "photo_attachment_id",
+            "expected_source_revision",
+        }
         if set(request) - allowed or not {"proposal_id", "case_id", "event", "source"}.issubset(
             request
         ):
@@ -767,6 +786,11 @@ class DistributorOperations:
         attachment_id = request.get("photo_attachment_id")
         if attachment_id is not None:
             attachment_id = _text(attachment_id, "photo_attachment_id")
+        expected_source_revision = request.get("expected_source_revision")
+        if expected_source_revision is not None:
+            expected_source_revision = _text(
+                expected_source_revision, "proposal expected_source_revision"
+            )
         encoded_event = _encode(event)
         with self._lock:
             source_facts = self._read_source()
@@ -774,6 +798,11 @@ class DistributorOperations:
             state, source_facts = self._merge_source(state, source_facts)
             if source_facts["source_status"] != "CURRENT":
                 raise ValueError("current ERP evidence is unavailable; no proposal can be prepared")
+            if (
+                expected_source_revision is not None
+                and self._source_revision(source_facts) != expected_source_revision
+            ):
+                raise ValueError("proposal source is stale; review current ERP evidence")
             revision = self._proposal_revision(state, source_facts)
             existing = self._db.execute(
                 "SELECT case_id, event_json, source, attachment_id, state_revision, result_json, "
@@ -1501,6 +1530,859 @@ class DistributorOperations:
             "read_only": True,
         }
         return {**projection, "conversation": conversation}
+
+    def assist(self, question: str, *, photo_attachment_id: str | None = None) -> dict[str, object]:
+        """Run one evidence-bound assistant turn and prepare only an allowed proposal.
+
+        The model never receives an execution surface. A completed physical draft can only
+        become a local manager proposal after the adapter verifies current same-case evidence,
+        literal user citations for physical inputs, and the existing event bounds. Economic
+        preparation is delegated to its already-gated native path.
+        """
+
+        clean = " ".join(question.split()) if isinstance(question, str) else ""
+        if not clean or len(question) > 500:
+            raise ValueError(
+                "Ask a specific distributor operations question using at most 500 characters."
+            )
+        with self._lock:
+            projection, source_revision, _state = self._assist_snapshot()
+            turn_id, recorded_at = self._new_assist_turn_identity(clean)
+            history = self._assist_history()
+            attachment_id = (
+                _text(photo_attachment_id, "assist photo_attachment_id")
+                if photo_attachment_id is not None
+                else None
+            )
+            if attachment_id is not None:
+                self._attachment_metadata(attachment_id)
+        if not self._assist_source_is_current(projection, source_revision):
+            return self._with_assistant(
+                projection,
+                self._assistant_unavailable(
+                    "SOURCE_UNAVAILABLE",
+                    "Current ERP evidence is unavailable; no action was prepared.",
+                ),
+            )
+        turn = self._assist_turn
+        if turn is None:
+            return self._with_assistant(
+                projection,
+                self._assistant_unavailable(
+                    "ASSISTANT_NOT_CONFIGURED",
+                    "The distributor operations assistant is not configured; "
+                    "no action was prepared.",
+                ),
+            )
+        model_projection = cast(dict[str, object], _copy(projection))
+        model_projection["_assist_context"] = {
+            "current_user_turn_id": turn_id,
+            "history": history,
+            "photo_attachment_id": attachment_id,
+        }
+        try:
+            raw_result = turn(clean, model_projection)
+        except Exception as error:
+            return self._with_assistant(
+                projection,
+                self._assistant_unavailable(
+                    f"MODEL_UNAVAILABLE:{type(error).__name__}",
+                    "The operations assistant is unavailable; no action was prepared.",
+                ),
+            )
+        assistant = self._assistant_response(raw_result)
+        with self._lock:
+            self._record_assist_turn(
+                turn_id,
+                clean,
+                assistant,
+                source_revision,
+                recorded_at,
+            )
+        if assistant["status"] != "COMPLETE" or not isinstance(raw_result, Mapping):
+            return self._with_assistant(projection, assistant)
+
+        physical_draft = raw_result.get("physical_draft")
+        photo_analysis = raw_result.get("photo_analysis")
+        intent = raw_result.get("intent")
+        if isinstance(photo_analysis, Mapping):
+            return self._assist_photo_analysis(
+                projection=projection,
+                initial_source_revision=source_revision,
+                photo_attachment_id=attachment_id,
+                question_by_turn={
+                    **{
+                        _text(item["user_turn_id"], "assist history turn_id"): _text(
+                            item["question"], "assist history question"
+                        )
+                        for item in history
+                        if isinstance(item, Mapping)
+                        and isinstance(item.get("user_turn_id"), str)
+                        and isinstance(item.get("question"), str)
+                    },
+                    turn_id: clean,
+                },
+                raw_analysis=photo_analysis,
+                assistant=assistant,
+            )
+        if isinstance(physical_draft, Mapping):
+            return self._assist_physical_draft(
+                projection=projection,
+                initial_source_revision=source_revision,
+                turn_id=turn_id,
+                recorded_at=recorded_at,
+                question_by_turn={
+                    **{
+                        _text(item["user_turn_id"], "assist history turn_id"): _text(
+                            item["question"], "assist history question"
+                        )
+                        for item in history
+                        if isinstance(item, Mapping)
+                        and isinstance(item.get("user_turn_id"), str)
+                        and isinstance(item.get("question"), str)
+                    },
+                    turn_id: clean,
+                },
+                raw_draft=physical_draft,
+                assistant=assistant,
+            )
+        if intent == "PREPARE_ECONOMIC_SPLIT20":
+            return self._assist_economic_prepare(
+                projection=projection,
+                initial_source_revision=source_revision,
+                assistant=assistant,
+            )
+        return self._with_assistant(projection, assistant)
+
+    @staticmethod
+    def _with_assistant(
+        projection: Mapping[str, object], assistant: Mapping[str, object]
+    ) -> dict[str, object]:
+        return {**_copy(projection), "assistant": _copy(assistant)}
+
+    @staticmethod
+    def _assist_source_is_current(
+        projection: Mapping[str, object], source_revision: str | None
+    ) -> bool:
+        evidence_mode = projection.get("evidence_mode")
+        return (
+            source_revision is not None
+            and projection.get("available") is True
+            and projection.get("live_source") is True
+            and isinstance(evidence_mode, Mapping)
+            and evidence_mode.get("status") == "CURRENT"
+        )
+
+    @staticmethod
+    def _assistant_unavailable(reason: str, answer: str) -> dict[str, object]:
+        return {
+            "status": "UNAVAILABLE",
+            "answer": answer,
+            "missing_information": [],
+            "preparation": {"status": "BLOCKED", "reason": reason},
+        }
+
+    @staticmethod
+    def _assistant_response(raw: object) -> dict[str, object]:
+        if not isinstance(raw, Mapping) or raw.get("status") != "COMPLETE":
+            reason = raw.get("reason") if isinstance(raw, Mapping) else None
+            answer = raw.get("answer") if isinstance(raw, Mapping) else None
+            if not isinstance(answer, str) or not answer.strip():
+                answer = "The operations assistant is unavailable; no action was prepared."
+            result = DistributorOperations._assistant_unavailable(
+                (
+                    reason.strip()
+                    if isinstance(reason, str) and reason.strip()
+                    else "MODEL_UNAVAILABLE"
+                ),
+                answer.strip(),
+            )
+            if isinstance(raw, Mapping) and isinstance(raw.get("provider"), Mapping):
+                result["provider"] = _copy(raw["provider"])
+            return result
+        answer = raw.get("answer")
+        try:
+            display = english_product_text(answer, field="operations assistant answer")
+        except ProductLanguageViolation:
+            return DistributorOperations._assistant_unavailable(
+                "MODEL_DECISION_MALFORMED",
+                "The operations assistant returned an unavailable response; "
+                "no action was prepared.",
+            )
+        missing: list[dict[str, object]] = []
+        raw_missing = raw.get("missing_information")
+        if not isinstance(raw_missing, list):
+            return DistributorOperations._assistant_unavailable(
+                "MODEL_DECISION_MALFORMED",
+                "The operations assistant returned an unavailable response; "
+                "no action was prepared.",
+            )
+        seen: set[str] = set()
+        try:
+            for item in raw_missing:
+                if not isinstance(item, Mapping):
+                    raise ValueError("missing information item")
+                field = _text(item.get("field"), "assistant missing information field")
+                prompt = _text(item.get("prompt"), "assistant missing information prompt")
+                if len(field) > 80 or len(prompt) > 500 or field in seen:
+                    raise ValueError("assistant missing information")
+                seen.add(field)
+                missing.append({"field": field, "prompt": prompt})
+        except ValueError:
+            return DistributorOperations._assistant_unavailable(
+                "MODEL_DECISION_MALFORMED",
+                "The operations assistant returned an unavailable response; "
+                "no action was prepared.",
+            )
+        result: dict[str, object] = {
+            "status": "COMPLETE",
+            "answer": display,
+            "missing_information": missing,
+            "preparation": {"status": "NOT_REQUESTED"},
+        }
+        if isinstance(raw.get("provider"), Mapping):
+            result["provider"] = _copy(raw["provider"])
+        if isinstance(raw.get("usage"), Mapping):
+            result["usage"] = _copy(raw["usage"])
+        return result
+
+    def _assist_snapshot(self) -> tuple[dict[str, object], str | None, dict[str, object]]:
+        """Read the fresh evidence once before a model turn without retaining a side effect."""
+
+        if self._retained_projection:
+            retained, _recorded_at = self._latest_state_with_recorded_at()
+            state = retained or self._initial_state()
+            return (
+                self._projection(state, {"source_status": "RETAINED"}, retained_at=_recorded_at),
+                None,
+                state,
+            )
+        source = self._read_source()
+        state = self._latest_state() or self._initial_state()
+        state, source = self._merge_source(state, source)
+        return self._projection(state, source), self._source_revision(source), state
+
+    def _new_assist_turn_identity(self, question: str) -> tuple[str, str]:
+        now = self._now()
+        row = self._db.execute(
+            "SELECT MAX(recorded_at) FROM distributor_operation_assist_turns WHERE case_id=?",
+            (self._config["case_id"],),
+        ).fetchone()
+        if row is not None and isinstance(row[0], str):
+            try:
+                previous = datetime.fromisoformat(row[0].replace("Z", "+00:00"))
+            except ValueError:  # pragma: no cover - corrupt local store only
+                previous = now
+            if previous >= now:
+                now = previous + timedelta(microseconds=1)
+        recorded_at = now.isoformat()
+        digest = sha256(
+            _encode(
+                {
+                    "case_id": self._config["case_id"],
+                    "question": question,
+                    "recorded_at": recorded_at,
+                }
+            ).encode("utf-8")
+        ).hexdigest()[:32]
+        return "assist-" + digest, recorded_at
+
+    def _assist_history(self) -> list[dict[str, object]]:
+        rows = self._db.execute(
+            "SELECT turn_id, question, response_json FROM distributor_operation_assist_turns "
+            "WHERE case_id=? ORDER BY recorded_at DESC, rowid DESC LIMIT 4",
+            (self._config["case_id"],),
+        ).fetchall()
+        history: list[dict[str, object]] = []
+        for turn_id, question, response_json in reversed(rows):
+            if (
+                not isinstance(turn_id, str)
+                or not isinstance(question, str)
+                or not isinstance(response_json, str)
+            ):
+                continue
+            try:
+                response = _decoded(response_json, "assist response")
+            except RuntimeError:
+                continue
+            missing = response.get("missing_information")
+            history.append(
+                {
+                    "user_turn_id": turn_id,
+                    "question": question,
+                    "missing_information": _copy(missing) if isinstance(missing, list) else [],
+                }
+            )
+        return history
+
+    def _record_assist_turn(
+        self,
+        turn_id: str,
+        question: str,
+        assistant: Mapping[str, object],
+        source_revision: str,
+        recorded_at: str,
+    ) -> None:
+        durable = {
+            "status": assistant.get("status"),
+            "answer": assistant.get("answer"),
+            "missing_information": assistant.get("missing_information"),
+        }
+        self._db.execute(
+            "INSERT INTO distributor_operation_assist_turns "
+            "(turn_id, case_id, question, response_json, source_revision, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                turn_id,
+                self._config["case_id"],
+                question,
+                _encode(durable),
+                source_revision,
+                recorded_at,
+            ),
+        )
+
+    def _assist_economic_prepare(
+        self,
+        *,
+        projection: Mapping[str, object],
+        initial_source_revision: str,
+        assistant: dict[str, object],
+    ) -> dict[str, object]:
+        """Route one explicit assistant intent through the existing economic selector and gate."""
+
+        with self._lock:
+            refreshed, revision, _state = self._assist_snapshot()
+        if revision != initial_source_revision:
+            assistant["preparation"] = {
+                "status": "BLOCKED",
+                "reason": "SOURCE_CHANGED_AFTER_ASSISTANT_READ",
+            }
+            return self._with_assistant(refreshed, assistant)
+        previous = projection.get("prepared_proposal")
+        previous_id = previous.get("proposal_id") if isinstance(previous, Mapping) else None
+        try:
+            prepared = self.prepare_economic_proposal(
+                {
+                    "case_id": self._config["case_id"],
+                    "selected_candidate_id": SPLIT20_CANDIDATE_ID,
+                }
+            )
+        except ValueError as error:
+            assistant["preparation"] = {"status": "BLOCKED", "reason": str(error)}
+            return self._with_assistant(refreshed, assistant)
+        returned_projection = prepared.get("projection") if isinstance(prepared, Mapping) else None
+        result = (
+            cast(dict[str, object], _copy(returned_projection))
+            if isinstance(returned_projection, Mapping)
+            else refreshed
+        )
+        economic = prepared.get("economic_proposal") if isinstance(prepared, Mapping) else None
+        gate = economic.get("gate") if isinstance(economic, Mapping) else None
+        prepared_proposal = (
+            prepared.get("prepared_proposal") if isinstance(prepared, Mapping) else None
+        )
+        configured_economic = self._config.get("economic_proposal")
+        configured_event = (
+            configured_economic.get("split20_event")
+            if isinstance(configured_economic, Mapping)
+            else None
+        )
+        proposal_id = (
+            prepared_proposal.get("proposal_id") if isinstance(prepared_proposal, Mapping) else None
+        )
+        proposal_is_current = (
+            isinstance(economic, Mapping)
+            and economic.get("requested_candidate_id") == SPLIT20_CANDIDATE_ID
+            and isinstance(gate, Mapping)
+            and gate.get("allowed") is True
+            and isinstance(prepared_proposal, Mapping)
+            and prepared_proposal.get("source") == "ECONOMIC_RECOMMENDATION"
+            and isinstance(configured_event, Mapping)
+            and _encode(prepared_proposal.get("event")) == _encode(configured_event)
+            and prepared_proposal.get("status") == "PENDING_MANAGER_APPROVAL"
+        )
+        if proposal_is_current:
+            assistant["action_draft"] = {
+                "event": _copy(prepared_proposal.get("event")),
+                "source": prepared_proposal.get("source"),
+                "proposal_id": proposal_id,
+                "case_id": self._config["case_id"],
+                "state_revision": prepared_proposal.get("state_revision"),
+            }
+            assistant["preparation"] = {
+                "status": "READY_FOR_CONFIRMATION",
+                "reason": (
+                    "EXISTING_PREPARED_PROPOSAL"
+                    if isinstance(previous_id, str) and previous_id == proposal_id
+                    else "PREPARED_BY_ECONOMIC_GATE"
+                ),
+            }
+        else:
+            reasons = gate.get("reasons") if isinstance(gate, Mapping) else None
+            assistant["preparation"] = {
+                "status": "BLOCKED",
+                "reason": (
+                    reasons
+                    if isinstance(reasons, list)
+                    else "ECONOMIC_PROPOSAL_ALREADY_TERMINAL"
+                    if isinstance(prepared_proposal, Mapping)
+                    else "ECONOMIC_GATE_BLOCKED"
+                ),
+            }
+        return self._with_assistant(result, assistant)
+
+    def _assist_photo_analysis(
+        self,
+        *,
+        projection: Mapping[str, object],
+        initial_source_revision: str,
+        photo_attachment_id: str | None,
+        question_by_turn: Mapping[str, str],
+        raw_analysis: Mapping[str, object],
+        assistant: dict[str, object],
+    ) -> dict[str, object]:
+        """Run the existing real photo reader only for a current, same-case attachment."""
+
+        if photo_attachment_id is None:
+            assistant["preparation"] = {"status": "BLOCKED", "reason": "PHOTO_NOT_ATTACHED"}
+            return self._with_assistant(projection, assistant)
+        with self._lock:
+            refreshed, revision, _state = self._assist_snapshot()
+        if revision != initial_source_revision:
+            assistant["preparation"] = {
+                "status": "BLOCKED",
+                "reason": "SOURCE_CHANGED_AFTER_ASSISTANT_READ",
+            }
+            return self._with_assistant(refreshed, assistant)
+        if set(raw_analysis) - {"lot", "purpose", "lot_citation"}:
+            assistant["preparation"] = {"status": "BLOCKED", "reason": "PHOTO_REQUEST_MALFORMED"}
+            return self._with_assistant(refreshed, assistant)
+        try:
+            lot = _text(raw_analysis.get("lot"), "photo analysis lot")
+            purpose = self._photo_purpose(raw_analysis.get("purpose"))
+            lots = refreshed.get("lots")
+            current_lots = (
+                {
+                    _text(row.get("lot"), "current photo lot")
+                    for row in lots
+                    if isinstance(row, Mapping)
+                }
+                if isinstance(lots, list)
+                else set()
+            )
+            if lot not in current_lots:
+                raise ValueError("PHOTO_LOT_NOT_CURRENT")
+            if len(current_lots) != 1:
+                self._assist_field_is_user_declared(
+                    raw_analysis.get("lot_citation"),
+                    field="lot",
+                    value=lot,
+                    question_by_turn=question_by_turn,
+                )
+        except ValueError as error:
+            if str(error) == "USER_DECLARATION_REQUIRED:lot":
+                choices = ", ".join(sorted(current_lots))
+                assistant["status"] = "COMPLETE"
+                assistant["answer"] = "Which lot does this photo belong to?"
+                assistant["missing_information"] = [
+                    {
+                        "field": "lot",
+                        "prompt": "Which current lot does this photo belong to? Choose one: "
+                        + choices
+                        + ".",
+                    }
+                ]
+                assistant["preparation"] = {
+                    "status": "NOT_REQUESTED",
+                    "reason": "LOT_REQUIRED_FOR_PHOTO_ANALYSIS",
+                }
+                return self._with_assistant(refreshed, assistant)
+            assistant["preparation"] = {"status": "BLOCKED", "reason": str(error)}
+            return self._with_assistant(refreshed, assistant)
+        try:
+            analyzed = self.analyze_photo(
+                {
+                    "attachment_id": photo_attachment_id,
+                    "lot": lot,
+                    "purpose": purpose,
+                }
+            )
+        except ValueError as error:
+            assistant["status"] = "UNAVAILABLE"
+            assistant["preparation"] = {"status": "BLOCKED", "reason": str(error)}
+            return self._with_assistant(refreshed, assistant)
+        attachments = analyzed.get("photo_attachments")
+        attachment = (
+            next(
+                (
+                    row
+                    for row in attachments
+                    if isinstance(row, Mapping) and row.get("attachment_id") == photo_attachment_id
+                ),
+                None,
+            )
+            if isinstance(attachments, list)
+            else None
+        )
+        analysis = attachment.get("analysis") if isinstance(attachment, Mapping) else None
+        status = analysis.get("status") if isinstance(analysis, Mapping) else None
+        photo_result = {
+            "attachment_id": photo_attachment_id,
+            "lot": lot,
+            "purpose": purpose,
+            "status": status if isinstance(status, str) else "UNAVAILABLE",
+            "assessment": _copy(analysis.get("assessment"))
+            if isinstance(analysis, Mapping) and isinstance(analysis.get("assessment"), Mapping)
+            else None,
+            "recommendation": _copy(analysis.get("recommendation"))
+            if isinstance(analysis, Mapping) and isinstance(analysis.get("recommendation"), Mapping)
+            else None,
+            "next_action": _copy(analysis.get("next_action"))
+            if isinstance(analysis, Mapping) and isinstance(analysis.get("next_action"), Mapping)
+            else None,
+        }
+        assistant["photo_analysis"] = photo_result
+        if status != "COMPLETE":
+            assistant["status"] = "UNAVAILABLE"
+            assistant["answer"] = self._photo_assist_message(
+                analysis,
+                fallback="Photo analysis was unavailable; no action was prepared.",
+            )
+            assistant["preparation"] = {
+                "status": "BLOCKED",
+                "reason": "PHOTO_ANALYSIS_UNAVAILABLE",
+            }
+            return self._with_assistant(analyzed, assistant)
+        assistant["answer"] = self._photo_assist_message(
+            analysis,
+            fallback="Photo analysis completed. Review the observation before any action.",
+        )
+        assistant["preparation"] = {"status": "PHOTO_ANALYZED"}
+        return self._with_assistant(analyzed, assistant)
+
+    @staticmethod
+    def _photo_assist_message(analysis: object, *, fallback: str) -> str:
+        if isinstance(analysis, Mapping):
+            for key in ("recommendation", "next_action"):
+                value = analysis.get(key)
+                message = value.get("message") if isinstance(value, Mapping) else None
+                if isinstance(message, str) and message.strip():
+                    return message.strip()
+        return fallback
+
+    def _assist_physical_draft(
+        self,
+        *,
+        projection: Mapping[str, object],
+        initial_source_revision: str,
+        turn_id: str,
+        recorded_at: str,
+        question_by_turn: Mapping[str, str],
+        raw_draft: Mapping[str, object],
+        assistant: dict[str, object],
+    ) -> dict[str, object]:
+        """Validate a narrow human-declared draft before it becomes a manager proposal."""
+
+        with self._lock:
+            refreshed, revision, current_state = self._assist_snapshot()
+        if revision != initial_source_revision:
+            assistant["preparation"] = {
+                "status": "BLOCKED",
+                "reason": "SOURCE_CHANGED_AFTER_ASSISTANT_READ",
+            }
+            return self._with_assistant(refreshed, assistant)
+        try:
+            event = self._assist_event_from_draft(
+                raw_draft,
+                turn_id=turn_id,
+                recorded_at=recorded_at,
+                question_by_turn=question_by_turn,
+            )
+            preflight = self._preflight_assist_event(current_state, event)
+            if preflight is not None:
+                raise ValueError(preflight)
+        except ValueError as error:
+            assistant["preparation"] = {"status": "BLOCKED", "reason": str(error)}
+            return self._with_assistant(refreshed, assistant)
+        proposal_id = (
+            "assist-proposal-"
+            + sha256(
+                _encode(
+                    {
+                        "case_id": self._config["case_id"],
+                        "event": event,
+                        "source_revision": initial_source_revision,
+                    }
+                ).encode("utf-8")
+            ).hexdigest()[:32]
+        )
+        assistant["action_draft"] = {
+            "event": _copy(event),
+            "source": "OPERATOR_DECLARED",
+            "proposal_id": proposal_id,
+            "case_id": self._config["case_id"],
+        }
+        if raw_draft.get("prepare_requested") is not True:
+            assistant["preparation"] = {
+                "status": "NOT_REQUESTED",
+                "reason": "AWAITING_OPERATOR_PREPARE_REQUEST",
+            }
+            return self._with_assistant(refreshed, assistant)
+        previous = projection.get("prepared_proposal")
+        previous_id = previous.get("proposal_id") if isinstance(previous, Mapping) else None
+        try:
+            prepared = self.prepare_event_proposal(
+                {
+                    "proposal_id": proposal_id,
+                    "case_id": self._config["case_id"],
+                    "event": event,
+                    "source": "OPERATOR_DECLARED",
+                    "expected_source_revision": initial_source_revision,
+                }
+            )
+        except ValueError as error:
+            assistant["preparation"] = {"status": "BLOCKED", "reason": str(error)}
+            return self._with_assistant(refreshed, assistant)
+        proposal = prepared.get("prepared_proposal")
+        if isinstance(proposal, Mapping):
+            action = cast(dict[str, object], assistant["action_draft"])
+            action["state_revision"] = proposal.get("state_revision")
+            assistant["preparation"] = {
+                "status": "READY_FOR_CONFIRMATION",
+                "reason": (
+                    "EXISTING_PREPARED_PROPOSAL"
+                    if isinstance(previous_id, str) and previous_id == proposal_id
+                    else "PREPARED_OPERATOR_DECLARATION"
+                ),
+            }
+        else:  # pragma: no cover - prepare_event_proposal always emits the proposal
+            assistant["preparation"] = {"status": "BLOCKED", "reason": "PROPOSAL_UNAVAILABLE"}
+        return self._with_assistant(prepared, assistant)
+
+    def _assist_event_from_draft(
+        self,
+        raw_draft: Mapping[str, object],
+        *,
+        turn_id: str,
+        recorded_at: str,
+        question_by_turn: Mapping[str, str],
+    ) -> dict[str, object]:
+        if set(raw_draft) - {"event", "user_field_citations", "prepare_requested"}:
+            raise ValueError("ASSISTED_DRAFT_MALFORMED")
+        raw_event = raw_draft.get("event")
+        if not isinstance(raw_event, Mapping):
+            raise ValueError("ASSISTED_DRAFT_MALFORMED")
+        event = cast(dict[str, object], _copy(raw_event))
+        event_type = event.get("type")
+        if event_type == "arrival":
+            allowed = {
+                "type",
+                "lot",
+                "cartons",
+                "observed_stock_quantity",
+                "item_code",
+                "expected_pack_quantity",
+                "synthetic",
+            }
+            if set(event) - allowed:
+                raise ValueError("ASSISTED_ARRIVAL_DRAFT_MALFORMED")
+            lot = _text(event.get("lot"), "assist arrival lot")
+            configured_lot = self._configured_lot(lot)
+            event["item_code"] = self._config["item_code"]
+            event["expected_pack_quantity"] = configured_lot.get(
+                "expected_pack_quantity", self._config["expected_pack_quantity"]
+            )
+            required_user_fields = ("lot", "cartons", "observed_stock_quantity")
+        elif event_type == "inspection":
+            allowed = {
+                "type",
+                "lot",
+                "result",
+                "scope",
+                "metric",
+                "measured",
+                "sample_quantity",
+                "synthetic",
+            }
+            if set(event) - allowed:
+                raise ValueError("ASSISTED_INSPECTION_DRAFT_MALFORMED")
+            metric = _text(event.get("metric"), "assist inspection metric")
+            criteria = cast(Mapping[str, object], self._config["policy"]).get("inspection_criteria")
+            bounds = criteria.get(metric) if isinstance(criteria, Mapping) else None
+            if not isinstance(bounds, Mapping):
+                raise ValueError("INSPECTION_CRITERION_UNAVAILABLE")
+            measured = _quantity(event.get("measured"), "assist inspection measured")
+            minimum = _quantity(bounds.get("minimum"), "assist inspection minimum")
+            maximum = _quantity(bounds.get("maximum"), "assist inspection maximum")
+            # The user declares the measurement.  The adapter derives PASS/FAIL from
+            # the configured criterion so the operator need not type a canonical status.
+            event["result"] = "PASS" if minimum <= measured <= maximum else "FAIL"
+            required_user_fields = (
+                "lot",
+                "scope",
+                "metric",
+                "measured",
+                "sample_quantity",
+            )
+        else:
+            raise ValueError("ASSISTED_PHYSICAL_EVENT_UNSUPPORTED")
+        event["synthetic"] = self._config["synthetic_input"]
+        event["occurred_at"] = recorded_at
+        event["evidence_ref"] = "operator-declaration:" + turn_id
+        if event_type == "inspection":
+            event["inspection_report_ref"] = "operator-declaration:" + turn_id + ":inspection"
+        citations = raw_draft.get("user_field_citations")
+        if not isinstance(citations, list):
+            raise ValueError("ASSISTED_DRAFT_CITATIONS_MISSING")
+        for field in required_user_fields:
+            self._assist_field_is_user_declared(
+                citations,
+                field=field,
+                value=event.get(field),
+                question_by_turn=question_by_turn,
+            )
+        event["event_id"] = (
+            "assist-event-"
+            + sha256(
+                _encode({"case_id": self._config["case_id"], "event": event}).encode("utf-8")
+            ).hexdigest()[:32]
+        )
+        return self._validate_event(event)
+
+    @staticmethod
+    def _assist_field_is_user_declared(
+        citation: object,
+        *,
+        field: str,
+        value: object,
+        question_by_turn: Mapping[str, str],
+    ) -> None:
+        rows = citation if isinstance(citation, list) else [citation]
+        for raw in rows:
+            if not isinstance(raw, Mapping):
+                continue
+            if raw.get("field") != field or not DistributorOperations._assist_citation_matches(
+                raw.get("value"), value
+            ):
+                continue
+            turn_id = raw.get("user_turn_id")
+            question = question_by_turn.get(turn_id) if isinstance(turn_id, str) else None
+            if isinstance(question, str) and DistributorOperations._assist_text_contains(
+                question,
+                value,
+                field=field,
+            ):
+                return
+        raise ValueError("USER_DECLARATION_REQUIRED:" + field)
+
+    @staticmethod
+    def _assist_citation_matches(declared: object, value: object) -> bool:
+        """Accept numerically equivalent JSON evidence, but no loose coercions."""
+
+        if (
+            isinstance(declared, (int, float))
+            and not isinstance(declared, bool)
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
+            try:
+                return Decimal(str(declared)) == Decimal(str(value))
+            except InvalidOperation:
+                return False
+        return _encode(declared) == _encode(value)
+
+    @staticmethod
+    def _assist_text_contains(question: str, value: object, *, field: str) -> bool:
+        """Match only bounded human-friendly forms for cited physical evidence."""
+
+        if isinstance(value, str):
+            normalized_question = re.sub(r"[\s_-]+", " ", question.casefold())
+            normalized_value = re.sub(r"[\s_-]+", " ", value.casefold())
+            if value.casefold() in question.casefold() or normalized_value in normalized_question:
+                return True
+            if field == "scope" and value == "WHOLE_LOT":
+                return bool(
+                    re.search(
+                        r"\b(?:whole|entire)\s+(?:the\s+)?lot\b|"
+                        r"\ball\s+(?:of\s+)?(?:the\s+)?lot\b",
+                        question,
+                        flags=re.IGNORECASE,
+                    )
+                )
+            if field == "scope" and value == "SAMPLE":
+                return bool(
+                    re.search(r"\b(?:sample|spot[ -]?check)\b", question, flags=re.IGNORECASE)
+                )
+            if field == "metric" and value == "diameter_mm":
+                return bool(
+                    re.search(r"\bdiameter\b", question, flags=re.IGNORECASE)
+                    and re.search(
+                        r"\bmm\b|\bmillimet(?:er|re)s?\b|\d\s*mm\b",
+                        question,
+                        flags=re.IGNORECASE,
+                    )
+                )
+            return False
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            try:
+                expected = Decimal(str(value))
+            except InvalidOperation:
+                return False
+            # A numeric token cannot be embedded in a lot code (B5) or a
+            # different quantity (25).  Decimal comparison makes 10 and 10.0 equal.
+            for matched in re.finditer(
+                r"(?<![A-Za-z0-9_])(\d+(?:\.\d+)?)(?![A-Za-z0-9_])", question
+            ):
+                try:
+                    if Decimal(matched.group(1)) == expected:
+                        return True
+                except InvalidOperation:  # pragma: no cover - regex is numeric
+                    continue
+        return False
+
+    def _preflight_assist_event(
+        self, state: Mapping[str, object], event: Mapping[str, object]
+    ) -> str | None:
+        """Check the existing event's business bounds without invoking the ERP bridge."""
+
+        event_type = event.get("type")
+        if event_type == "arrival":
+            lot = self._lot(state, _text(event.get("lot"), "assist arrival lot"))
+            if lot is None:
+                return "PHOTO_OR_ERP_LOT_NOT_CURRENT"
+            observed = _quantity(
+                event.get("observed_stock_quantity"), "assist observed", positive=True
+            )
+            cartons = _whole(event.get("cartons"), "assist cartons", positive=True)
+            pack = _quantity(event.get("expected_pack_quantity"), "assist pack", positive=True)
+            if observed > Decimal(cartons) * pack:
+                return "OBSERVED_COUNT_EXCEEDS_PACKING"
+            if observed + _quantity(lot.get("received"), "assist lot received") > _quantity(
+                lot.get("expected_quantity"), "assist lot expected"
+            ):
+                return "LOT_OVER_RECEIPT"
+            return None
+        if event_type == "inspection":
+            lot = self._lot(state, _text(event.get("lot"), "assist inspection lot"))
+            if lot is None or _quantity(lot.get("received"), "assist lot received") <= 0:
+                return "INSPECTION_LOT_NOT_RECEIVED"
+            criteria = cast(Mapping[str, object], self._config["policy"]).get("inspection_criteria")
+            bounds = criteria.get(event.get("metric")) if isinstance(criteria, Mapping) else None
+            if not isinstance(bounds, Mapping):
+                return "INSPECTION_CRITERION_UNAVAILABLE"
+            measured = _quantity(event.get("measured"), "assist inspection measured")
+            minimum = _quantity(bounds.get("minimum"), "assist inspection minimum")
+            maximum = _quantity(bounds.get("maximum"), "assist inspection maximum")
+            expected_result = "PASS" if minimum <= measured <= maximum else "FAIL"
+            if event.get("result") != expected_result:
+                return "INSPECTION_RESULT_CONFLICT"
+            if event.get("scope") == "WHOLE_LOT" and _quantity(
+                event.get("sample_quantity"), "assist sample quantity", positive=True
+            ) < _quantity(lot.get("received"), "assist lot received"):
+                return "WHOLE_LOT_EVIDENCE_INCOMPLETE"
+            return None
+        return "ASSISTED_PHYSICAL_EVENT_UNSUPPORTED"
 
     @staticmethod
     def _conversation_context(projection: Mapping[str, object]) -> str:
