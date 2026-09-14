@@ -28,7 +28,8 @@
   `docs/design/approved-dashboard/dashboard-look-2.jpg`.
   The layout is journey and a compact KPI strip beside recent events, then a
   large receiving photo beside a deep-green impact card, followed by a visible,
-  always-expanded benchmark section. Preserve the three existing workspace views.
+  always-expanded benchmark section. The approved September 13 follow-up replaces
+  the three-view navigation with Dashboard and Operations plus a shared Agent sidebar.
 - Benchmark history is explicitly authorized to use consistent synthetic weekly
   records and trend charts, with a concise visible `Demo history` label. Keep
   these separate from current-order metrics read from the real backend; do not
@@ -44,12 +45,17 @@
 - Photo analysis, order quantities, economic decisions, and actions must remain
   connected to the real backend. A visual restoration must not restore old
   hardcoded scenario data. Verify with the browser; the user owns visual approval.
-- Keep workspace responsibilities distinct: Dashboard shows current status,
-  journey/KPIs, photo summary, business impact and benchmarks. Investigation owns
-  agent reasoning, evidence comparison, candidate decisions and follow-up Q&A.
-  Operations owns photo/evidence capture, inspection, exact-action confirmation,
-  execution and readback. Share one case context and route handoffs between views;
-  do not duplicate complete forms, investigation panels or approval controls.
+- Dashboard shows current status, journey/KPIs, photo summary, business impact
+  and benchmarks. Its Ask Agent action opens the shared contextual sidebar.
+- Operations combines Receiving, Findings and Next action in the left workspace
+  with a persistent Agent sidebar on the right (approximately 65/35 on desktop;
+  drawer on narrow screens). Investigation is no longer a separate destination.
+- Agent conversation, uploads and exact-action confirmation cards are the primary
+  interaction. Keep manual fields under Edit details as a fallback. Agent-generated
+  drafts reuse real evidence and existing prepare/approval/readback boundaries;
+  never infer physical measurements or quality clearance from insufficient photos.
+- Preserve one case context and conversation across views. Keep detailed evidence
+  on demand; avoid duplicate forms, approval controls and technical metadata.
 
 ## Small-business hackathon scope and UI review (user steering, September 12)
 
