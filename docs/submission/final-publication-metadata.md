@@ -1,6 +1,6 @@
 # Final publication metadata — LogisticPilot TAKE05
 
-Status: **independent film/claims review PASS for the resynchronized export; public upload and judging-access checks remain open.**
+Status: **published and submitted. Independent film/claims review PASS; public YouTube playback and Devpost receipt verified on 2026-09-14.**
 This file is the copy source for the public video and Devpost entry. It describes
 TAKE05 only; earlier PO20, PO25, and PO26 cases are historical evidence.
 
@@ -23,6 +23,9 @@ TAKE05 only; earlier PO20, PO25, and PO26 cases are historical evidence.
   [current claim manifest](current-claim-manifest.md).
 
 ## YouTube metadata
+
+- Public video: https://youtu.be/0xybw7CpixQ
+- Published title: **LogisticPilot — The Missing 20 | Agents for Humans**
 
 ### Title
 
@@ -67,6 +70,9 @@ Pro`, `Claude Opus 4.6`, `ERPNext`, `Airtable`, `Jira`, `Slack`,
 
 ## Devpost field map
 
+- Submitted project: https://devpost.com/software/the-missing-20-agents-for-humans
+- Devpost displayed **Project submitted!** on 2026-09-14 before the deadline.
+
 | Devpost field | Value or action |
 | --- | --- |
 | Project name | `LogisticPilot` |
@@ -74,7 +80,7 @@ Pro`, `Claude Opus 4.6`, `ERPNext`, `Airtable`, `Jira`, `Slack`,
 | Track | `Professional Agents` — verify the selected track in the live form before submission. |
 | Project description | Paste the YouTube description above, or use its first three paragraphs for a shorter field. Preserve the claim boundary in the final paragraph. |
 | Repository | `https://github.com/danielwanwx/logisticpilot` |
-| Video | Upload the independently reviewed TAKE05 file, then paste the verified public video URL. |
+| Video | `https://youtu.be/0xybw7CpixQ` — public playback verified. |
 | Live demo | Leave blank unless a stable, freely accessible demo is independently verified for the full judging period. |
 | AWS Builder ID | Enter it only in Devpost. Do not add an account email or Builder ID to the repository. |
 | Testing instructions | Paste the instructions below. |
