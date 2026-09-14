@@ -78,7 +78,9 @@ operator-confirmed inspection and is not a quality disposition.
 
 `CURRENT` is the API's freshness status at each read; the source supplied no
 effective timestamp (`evidence_mode.as_of=null`). It does not turn these
-public reference photographs into current warehouse evidence. The raw
+public reference photographs into current warehouse evidence. Both completed
+analyses reported source revision
+`d377d37913944134379b9f69ed82e5c1f65d6bcc5f7b99425a34879047ca5946`. The raw
 responses remain outside the repository in `/private/tmp`:
 
 - `/private/tmp/logisticpilot-photo-api-20260913-input-02-upload.json`

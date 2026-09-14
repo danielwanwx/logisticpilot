@@ -17,8 +17,8 @@ Prepare A20 receipt and its declared passing inspection, then B5 receipt with it
 | Time | Screen / real action | English narration and proof |
 | --- | --- | --- |
 | 0:00–0:25 | Dashboard, B5 incident and 25/20/5 scope. | “For a small distributor, one questionable carton can turn into a morning of checking photos, inspection records and customer orders. Here, five parts need inspection. Twenty other parts can still serve the customer.” |
-| 0:25–0:50 | Click the incident into Operations; selected B5, PO and customer order. | “We start with the affected batch. The order, evidence and assistant stay in the same context as I move into the work.” |
-| 0:50–1:30 | Attached photo; actual analysis if upload/timing preflight passes; concise finding. | “This is a public image used in our fictional receiving case. The model examines the carton. It can flag an observation and ask for a better view, but it cannot invent a measurement or release the stock.” |
+| 0:25–0:50 | Click the incident into Operations; choose the B5 goods card under Needs attention. Contrast A20 under Inspection passed. | “We start with the affected batch. Its photograph, parts and quantity stay together. The other batch has its own recorded inspection, so we can review it separately.” |
+| 0:50–1:30 | Expand the selected batch's Photos & inspection; actual analysis if upload/timing preflight passes. Use the rusted-parts close-up for the main take and the carton image only as its own separate input. | “These public photographs are inputs to our fictional receiving case. The model examines the visible parts. It can flag an observation and ask for a better view, but it cannot invent a measurement or release the stock.” |
 | 1:30–2:10 | Ask what can move while B5 remains held; relevant order/inspection evidence. | “The assistant considers current inventory and order terms together. It explains why the qualified batch can move and what evidence the remaining batch still needs.” |
 | 2:10–2:40 | Supported dispatch and conditional consolidation estimate before approval. | “Sending twenty now keeps eligible fulfillment moving. Waiting might use one box instead of two, but only if the five held parts clear in time. This is a cost tradeoff, not a guaranteed saving.” |
 | 2:40–3:30 | Exact lot/quantity/order confirmation; confirm once on a fresh case. | “The agent prepares the work. I confirm the exact action. The application checks the latest evidence and writes the bounded operation to our ERPNext demo tenant.” |
@@ -46,6 +46,7 @@ For a completed-case take, replace question 2 with “What has been dispatched, 
 - AWS valid; current GET and a brief answer complete successfully.
 - New pending exact-action card if filming execution. Never replay PO25 as a fresh dispatch.
 - ERP record opens without a login interruption in the recording browser.
+- Use the existing signed-in Chrome profile for ERPNext. The in-app browser has separate cookies and currently opens the ERP login screen. Do not search for or copy another account's credentials.
 - Rates are estimates, history illustrative, order value is not revenue.
 - Runtime under five minutes, English narration, legible captured text.
 - Public video and judge access verified separately before submission.

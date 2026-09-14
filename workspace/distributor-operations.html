@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/assets/phosphor-regular.css" />
     <link rel="stylesheet" href="/assets/phosphor-bold.css" />
     <link rel="stylesheet" href="/style.css?v=source-driven-final-v32" />
-    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-two-view-v9" />
+    <link rel="stylesheet" href="/distributor-operations.css?v=20260913-goods-v16" />
     <title>LogisticPilot</title>
   </head>
   <body class="operations-shell" data-operations-state="loading" data-ops-view="dashboard">
@@ -49,10 +49,13 @@
       </section>
 
       <aside class="ops-case-card ops-status-strip" aria-label="Current incident evidence">
-        <div class="ops-status-case"><span class="object-label">Monitoring</span><strong id="ops-case-label">PO unavailable</strong></div>
+        <div class="ops-status-case"><span id="ops-case-context" class="object-label">Current incident</span><strong id="ops-case-label">PO unavailable</strong></div>
+        <a id="ops-active-incident" class="ops-active-incident" data-ops-view-link="operations" href="/operations?view=operations#ops-evidence-panel" hidden><strong id="ops-active-incident-title">Review incident</strong><span id="ops-active-incident-detail"></span></a>
         <span id="ops-case-id" class="ops-mono" hidden>Waiting for the source</span>
         <span id="ops-case-po" class="ops-mono" hidden>Purchase order unavailable</span>
         <span id="ops-refresh-state" class="ops-mono ops-evidence-status" aria-live="polite">Syncing</span>
+        <button id="ops-open-erp-records" class="ops-status-action" type="button" aria-haspopup="dialog">ERP records <i class="ph ph-buildings" aria-hidden="true"></i></button>
+        <button id="ops-check-erp" class="ops-status-action" type="button">Check ERP <i class="ph ph-arrow-clockwise" aria-hidden="true"></i></button>
         <button id="ops-status-ask-agent" class="ops-status-action" type="button" data-ops-open-agent="status">Ask Agent <i class="ph ph-sparkle" aria-hidden="true"></i></button>
       </aside>
 
@@ -130,9 +133,16 @@
           </aside>
 
           <section id="ops-overview" class="ops-panel ops-overview" aria-labelledby="ops-overview-title">
-            <header class="ops-panel-header"><div><span class="object-label">Findings</span><h2 id="ops-overview-title">Findings</h2></div><details class="ops-overview-record"><summary>Case details</summary><span id="ops-overview-case" class="ops-mono">Loading case</span></details></header>
+            <header class="ops-panel-header"><div><span class="object-label">Selected batch</span><h2 id="ops-overview-title">What needs attention</h2></div><details class="ops-overview-record"><summary>Case details</summary><span id="ops-overview-case" class="ops-mono">Loading case</span></details></header>
+            <div id="ops-problem-lot-findings" class="ops-problem-lot-context" hidden></div>
             <p id="ops-overview-copy" class="ops-panel-copy">Current exceptions and affected orders.</p>
             <div id="ops-findings-summary" class="ops-findings-summary" aria-live="polite"></div>
+            <nav id="ops-incident-workflow" class="ops-incident-workflow" aria-label="Incident workflow" hidden>
+              <button type="button" data-incident-step="review">Review evidence</button>
+              <button type="button" data-incident-step="agent">Ask Agent</button>
+              <button type="button" data-incident-step="action">Next action</button>
+              <button type="button" data-incident-step="records">Verify records</button>
+            </nav>
             <div id="ops-overview-graph" class="ops-overview-graph" aria-label="Cross-system operation graph"></div>
             <div class="ops-overview-links"><a id="ops-alert-focus-link" href="#ops-alerts-panel">Review alerts</a><a href="#ops-evidence-panel">Edit receiving details</a></div>
           </section>
@@ -140,8 +150,8 @@
           <section id="ops-economic-panel" class="ops-panel ops-economic-panel" aria-labelledby="ops-economic-title" hidden>
             <header id="ops-economic-toggle" class="ops-panel-header ops-economic-header" role="button" tabindex="0" aria-expanded="false">
               <div>
-                <span class="object-label">Next action</span>
-                <h2 id="ops-economic-title">Next action</h2>
+                <span class="object-label">Selected batch</span>
+                <h2 id="ops-economic-title">What happens next</h2>
                 <p id="ops-economic-subtitle" class="ops-economic-subtitle">Compare dispatch paths against the current order evidence.</p>
               </div>
               <div class="ops-economic-badges">
@@ -161,23 +171,23 @@
               <p id="ops-economic-execution-detail"></p>
             </details>
             <section class="ops-economic-evidence" aria-labelledby="ops-economic-evidence-title">
-              <details class="ops-economic-details">
+              <details id="ops-economic-details" class="ops-economic-details">
                 <summary>Supporting evidence</summary>
                 <div class="ops-economic-subheader"><span id="ops-economic-evidence-title" class="object-label">Decision evidence</span><button id="ops-economic-open-evidence" class="ops-text-button" type="button">Open evidence drawer</button></div>
                 <div id="ops-economic-sources" class="ops-economic-sources" aria-live="polite"></div>
               </details>
             </section>
-            <details class="ops-economic-decision-details">
+            <details id="ops-economic-decision-details" class="ops-economic-decision-details">
               <summary>View decision details</summary>
               <div id="ops-economic-selection" class="ops-economic-selection" aria-live="polite"></div>
-              <section class="ops-economic-model" aria-labelledby="ops-economic-model-title">
+              <section id="ops-economic-model" class="ops-economic-model" aria-labelledby="ops-economic-model-title">
                 <div class="ops-economic-subheader"><span id="ops-economic-model-title" class="object-label">Agent recommendation</span><span id="ops-economic-model-identity" class="ops-count-label">Model unavailable</span></div>
                 <p id="ops-economic-model-decision" class="ops-economic-model-decision">Decision unavailable from the source.</p>
                 <p id="ops-economic-model-note" class="ops-economic-model-note" hidden></p>
                 <div id="ops-economic-model-citations" class="ops-economic-citations" aria-label="Model citations"></div>
                 <details id="ops-economic-model-trace" class="ops-economic-trace" hidden><summary>View evidence reads</summary><span class="ops-synthetic-badge"><i class="ph ph-flask" aria-hidden="true"></i>Synthetic POC</span><pre id="ops-economic-model-trace-value"></pre></details>
               </section>
-              <section class="ops-economic-gate" aria-labelledby="ops-economic-gate-title">
+              <section id="ops-economic-gate" class="ops-economic-gate" aria-labelledby="ops-economic-gate-title">
                 <div class="ops-economic-subheader"><span id="ops-economic-gate-title" class="object-label">Dispatch checks</span><span id="ops-economic-gate-status" class="state-badge state-neutral">Status unavailable</span></div>
                 <div id="ops-economic-gate-details" class="ops-economic-gate-details"></div>
               </section>
@@ -189,6 +199,10 @@
               <div><span class="object-label">Agent</span><h2 id="ops-chat-title">Ask Agent</h2></div>
               <div class="ops-chat-context"><button id="ops-agent-upload" class="button button-quiet" type="button"><i class="ph ph-upload-simple" aria-hidden="true"></i>Upload</button><button id="ops-agent-drawer-close" class="ops-icon-button" type="button" aria-label="Close Agent"><i class="ph ph-x" aria-hidden="true"></i></button></div>
             </header>
+            <section id="ops-agent-case-brief" class="ops-agent-case-brief" aria-label="Selected lot brief" hidden>
+              <div id="ops-agent-case-brief-copy"></div>
+              <div id="ops-agent-context-prompts" class="ops-agent-context-prompts" aria-label="Lot questions"></div>
+            </section>
             <details id="ops-chat-activity-details" class="ops-chat-activity-details"><summary>Activity &amp; sources</summary>
               <div id="ops-agent-tools" class="ops-agent-tools" aria-label="Agent evidence tools"></div>
               <p id="ops-agent-tools-note" class="ops-agent-tools-note">Capability names describe what the read-only workflow can use. They are not an executed tool trace.</p>
@@ -218,10 +232,11 @@
 
           <section id="ops-evidence-panel" class="ops-panel ops-evidence-panel" aria-labelledby="ops-evidence-title">
             <header class="ops-panel-header">
-              <div><span class="object-label">Receiving</span><h2 id="ops-evidence-title">Receiving</h2></div>
+              <div><span class="object-label">Shipment workspace</span><h2 id="ops-evidence-title">Choose goods to review</h2></div>
               <button id="ops-open-agent-mobile" class="button button-quiet ops-open-agent-mobile" type="button" data-ops-open-agent="operations"><i class="ph ph-sparkle" aria-hidden="true"></i>Ask Agent</button>
             </header>
-            <div id="ops-receiving-summary" class="ops-receiving-summary" aria-live="polite"></div>
+            <div id="ops-batch-cards" class="ops-batch-cards" aria-live="polite"></div>
+            <section id="ops-selected-batch" class="ops-selected-batch" aria-live="polite" hidden></section>
             <p id="ops-evidence-copy" class="ops-panel-copy">Add a receiving photo. Agent asks for more detail only when needed.</p>
             <details id="ops-evidence-context-details" class="ops-evidence-context-details"><summary>Evidence context</summary><span class="ops-synthetic-badge"><i class="ph ph-flask" aria-hidden="true"></i>Simulated scanner / inspection / carrier evidence</span></details>
             <form id="ops-event-form" class="ops-operator-form" novalidate>
@@ -243,8 +258,12 @@
                 <details id="ops-photo-intake-details" class="ops-photo-intake-details"><summary>Photo boundaries</summary><p class="ops-photo-intake-note">Visible evidence only: hidden contents, dimensions, and quality clearance are never inferred. Existing manual QC and manager approval remain available below.</p></details>
               </div>
               <details id="ops-receiving-photo-history" class="ops-receiving-photo-history">
-                <summary>View photo history</summary>
+                <summary>Selected batch photos</summary>
                 <div id="ops-receiving-photo-history-slot"></div>
+              </details>
+              <details id="ops-all-case-photo-history" class="ops-receiving-photo-history ops-all-case-photo-history">
+                <summary>All case photos</summary>
+                <div id="ops-all-case-photos-list" class="ops-photos-list"></div>
               </details>
               <details id="ops-manual-event-details" class="ops-manual-event-details">
                 <summary>Edit details</summary>
@@ -344,11 +363,11 @@
     <div id="ops-agent-drawer-backdrop" class="ops-agent-drawer-backdrop" hidden></div>
     <div id="ops-evidence-drawer-backdrop" class="ops-evidence-drawer-backdrop" hidden></div>
     <aside id="ops-evidence-drawer" class="ops-evidence-drawer" role="dialog" aria-modal="true" aria-labelledby="ops-evidence-drawer-title" hidden>
-      <header><div><span class="object-label">Evidence drawer</span><h2 id="ops-evidence-drawer-title">Accepted source facts</h2></div><button id="ops-evidence-drawer-close" class="ops-icon-button" type="button" aria-label="Close evidence details"><i class="ph ph-x" aria-hidden="true"></i></button></header>
-      <p id="ops-evidence-drawer-status" class="ops-evidence-drawer-status">Evidence status loading</p>
+      <header><div><span class="object-label">Current case</span><h2 id="ops-evidence-drawer-title">ERP records</h2></div><button id="ops-evidence-drawer-close" class="ops-icon-button" type="button" aria-label="Close ERP records"><i class="ph ph-x" aria-hidden="true"></i></button></header>
+      <p id="ops-evidence-drawer-status" class="ops-evidence-drawer-status">ERP records loading</p>
       <div id="ops-evidence-drawer-facts" class="ops-evidence-drawer-facts" aria-live="polite"></div>
-      <button id="ops-evidence-drawer-open-operations" class="button button-primary" type="button">Open full operations evidence</button>
+      <button id="ops-evidence-drawer-open-operations" class="button button-primary" type="button">Open Operations</button>
     </aside>
-    <script src="/distributor-operations.js?v=20260913-two-view-v9"></script>
+    <script src="/distributor-operations.js?v=20260913-goods-v16"></script>
   </body>
 </html>

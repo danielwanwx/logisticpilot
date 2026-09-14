@@ -1172,7 +1172,13 @@
     return next.alerts.reduce((stages, alert, index) => {
       if (!isRecord(alert) || isResolvedAlert(alert)) return stages;
       const stage = alertStage(alert);
-      if (stage && !stages[stage]) stages[stage] = { index, code: firstText(alert, ["code", "kind"]) || "Active alert" };
+      if (stage && !stages[stage]) {
+        stages[stage] = {
+          index,
+          eventId: firstText(alert, ["event_id", "event", "source_event_id"]),
+          code: firstText(alert, ["code", "kind"]) || "Active alert",
+        };
+      }
       return stages;
     }, {});
   }
@@ -1630,11 +1636,47 @@
   let photoAnalysisFeedback = { message: "", tone: "" };
   let evidenceDrawerTrigger = null;
   let agentDrawerTrigger = null;
+  let selectedProblemLot = "";
+  let lastErpCheckAt = "";
+  let erpCheckInFlight = false;
+  const stableDisclosureIds = new Set([
+    "ops-chat-activity-details",
+    "ops-photo-analysis-details",
+    "ops-photo-review-inline-details",
+    "ops-receiving-photo-history",
+    "ops-all-case-photo-history",
+    "ops-economic-execution-details",
+    "ops-economic-details",
+    "ops-economic-decision-details",
+    "ops-economic-model-trace",
+  ]);
 
   function setText(id, value) {
     const node = $(id);
     if (node) node.textContent = value == null ? "" : String(value);
     return node;
+  }
+
+  function openDisclosureKeys() {
+    return [...document.querySelectorAll("details[open]")]
+      .map((node) => node.id && stableDisclosureIds.has(node.id)
+        ? `id:${node.id}`
+        : node.dataset.opsDisclosureKey ? `key:${node.dataset.opsDisclosureKey}` : "")
+      .filter(Boolean);
+  }
+
+  function restoreOpenDisclosures(keys) {
+    keys.forEach((key) => {
+      if (key.startsWith("id:")) {
+        const node = $(key.slice(3));
+        if (node) node.open = true;
+        return;
+      }
+      const value = key.slice(4);
+      const node = [...document.querySelectorAll("details[data-ops-disclosure-key]")]
+        .find((candidate) => candidate.dataset.opsDisclosureKey === value);
+      if (node) node.open = true;
+    });
   }
   function setConnection(label, tone = "cyan") {
     setText("ops-connection-label", label);
@@ -1681,6 +1723,7 @@
     const retained = Boolean(retainedEvidenceLabel(projection?.evidence_mode, projection));
     setConnection(retained ? "Retained" : "Synced", retained ? "cyan" : "lime");
     renderRefreshState();
+    renderErpCheckControl();
     updateEventButton();
     syncFreshEventControls(projection);
     updateAskButton();
@@ -1688,6 +1731,140 @@
   function displayQuantity(value) { return finite(value) ? formatNumber(value) : "Unknown"; }
   function quantity(projectionValue, key) {
     return numberFrom(projectionValue?.quantities?.[key]);
+  }
+
+  function currentLotName(lot) {
+    return firstText(lot, ["lot", "lot_id", "batch", "batch_no", "name", "id"]);
+  }
+
+  function currentLotNames(next) {
+    return Array.isArray(next?.lots)
+      ? next.lots.filter(isRecord).map(currentLotName).filter(Boolean)
+      : [];
+  }
+
+  function currentLotRecord(next, lotName) {
+    const target = text(lotName);
+    return target
+      ? (Array.isArray(next?.lots) ? next.lots.find((lot) => currentLotName(lot) === target) || null : null)
+      : null;
+  }
+
+  function openAlertLot(next, alert) {
+    const lot = firstText(alert, ["lot", "lot_id", "batch", "batch_no"]);
+    return currentLotNames(next).includes(lot) ? lot : "";
+  }
+
+  function openIncidentAlert(next, lotName = "") {
+    const requestedLot = text(lotName);
+    if (!Array.isArray(next?.alerts)) return null;
+    return next.alerts.find((alert) => {
+      if (!isRecord(alert) || alertStatus(alert) !== "OPEN") return false;
+      const lot = openAlertLot(next, alert);
+      const eventId = firstText(alert, ["event_id", "event", "source_event_id"]);
+      return Boolean(lot && eventId && (!requestedLot || lot === requestedLot));
+    }) || null;
+  }
+
+  function incidentQuantity(next, alert, lotName = "") {
+    const fromAlert = numberFromKeys(alert, ["quantity", "held_quantity", "awaiting_release_quantity"]);
+    if (finite(fromAlert)) return fromAlert;
+    const lot = currentLotRecord(next, lotName || openAlertLot(next, alert));
+    return numberFromKeys(lot, ["held", "held_quantity", "on_hold"]);
+  }
+
+  function inspectionRequiredText(next, alert) {
+    if (!alert || !isRecord(next?.quality_policy) || next.quality_policy.inspection_required !== true) return "Review evidence";
+    const criteria = isRecord(next.quality_policy.inspection_criteria) ? next.quality_policy.inspection_criteria : {};
+    const entry = Object.entries(criteria).find(([, value]) => isRecord(value));
+    if (!entry) return "Inspection needed";
+    const [metric, range] = entry;
+    const minimum = numberFrom(range.minimum);
+    const maximum = numberFrom(range.maximum);
+    const metricHasUnit = /_mm$/i.test(metric);
+    const unit = text(range.unit) || (metricHasUnit ? "mm" : "");
+    const measure = pretty(metricHasUnit ? metric.replace(/_mm$/i, "") : metric);
+    if (finite(minimum) && finite(maximum)) return `Inspect ${measure} ${formatNumber(minimum)}–${formatNumber(maximum)}${unit ? ` ${unit}` : ""}`;
+    return `Inspect ${measure}`;
+  }
+
+  function selectedProblemContext(next) {
+    const lot = currentLotNames(next).includes(selectedProblemLot) ? selectedProblemLot : "";
+    const alert = lot ? openIncidentAlert(next, lot) : null;
+    const alertQuantity = alert ? incidentQuantity(next, alert, lot) : null;
+    const eventId = alert ? firstText(alert, ["event_id", "event", "source_event_id"]) : "";
+    const linkedOrders = alert && Array.isArray(alert.orders)
+      ? alert.orders.map((order) => text(order)).filter(Boolean)
+      : [];
+    const allocations = Array.isArray(next?.allocations) ? next.allocations.filter(isRecord) : [];
+    const allocation = linkedOrders.length
+      ? allocations.find((row) => linkedOrders.includes(firstText(row, ["customer_order", "sales_order", "order", "order_id"]))) || null
+      : allocations.length === 1 ? allocations[0] : null;
+    const customerOrder = linkedOrders[0]
+      || firstText(allocation, ["customer_order", "sales_order", "order", "order_id"]);
+    return {
+      lot,
+      alert,
+      eventId,
+      quantity: alertQuantity,
+      customerOrder,
+      incidentOpen: Boolean(alert),
+      inspection: inspectionRequiredText(next, alert),
+      lotRecord: currentLotRecord(next, lot),
+    };
+  }
+
+  function requestedProblemLot() {
+    try { return text(new URLSearchParams(window.location.search).get("lot")); } catch { return ""; }
+  }
+
+  function resolveSelectedProblemLot(next) {
+    const valid = currentLotNames(next);
+    const requested = requestedProblemLot();
+    if (requested && valid.includes(requested)) return requested;
+    if (selectedProblemLot && valid.includes(selectedProblemLot)) return selectedProblemLot;
+    return openAlertLot(next, openIncidentAlert(next)) || valid[0] || "";
+  }
+
+  function selectedLotHref(lot, target = "ops-evidence-panel") {
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "operations");
+    if (lot) url.searchParams.set("lot", lot);
+    else url.searchParams.delete("lot");
+    url.hash = target;
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+
+  function applyProblemLot(next, lot, { history = "push", target = "", render = true } = {}) {
+    const valid = currentLotNames(next);
+    const resolved = valid.includes(text(lot))
+      ? text(lot)
+      : openAlertLot(next, openIncidentAlert(next)) || valid[0] || "";
+    selectedProblemLot = resolved;
+    reconcileAgentPhotoContext(next);
+    reconcileSelectedPhotoContext(next);
+    const url = new URL(window.location.href);
+    if (resolved) url.searchParams.set("lot", resolved);
+    else url.searchParams.delete("lot");
+    if (target) {
+      url.searchParams.set("view", "operations");
+      url.hash = target;
+    }
+    const href = `${url.pathname}${url.search}${url.hash}`;
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (href !== current) window.history[history === "replace" ? "replaceState" : "pushState"]({}, "", href);
+    if (render && next) renderProblemLotSurfaces(next);
+    if (target) setOpsView("operations", { scrollTarget: target });
+    return resolved;
+  }
+
+  function contextualLotQuestion(question) {
+    const context = selectedProblemContext(projection);
+    const value = text(question);
+    const prefix = `For ${context.lot}:`;
+    const explicitLot = currentLotNames(projection).find((lot) => value.toLowerCase().includes(lot.toLowerCase()));
+    if (!context.lot || explicitLot || value.toLowerCase().startsWith(prefix.toLowerCase())) return value;
+    return `${prefix} ${value}`;
   }
   function setQuantityCard(key, value, unit) {
     const card = document.querySelector(`[data-quantity-card="${key}"]`);
@@ -1758,10 +1935,179 @@
   function renderHeaderIncidentState(next) {
     const node = $("ops-header-incident-state");
     if (!node) return;
+    const context = selectedProblemContext(next);
     const purchaseOrder = purchaseOrderDisplay(next);
-    if (purchaseOrder) node.textContent = purchaseOrder;
+    if (context.incidentOpen && context.lot) node.textContent = context.lot;
+    else if (purchaseOrder) node.textContent = purchaseOrder;
     else if (economicConfigured && economicProposalFrom(next)) node.textContent = "SYNTHETIC POC";
     else node.textContent = "Operation";
+  }
+
+  function incidentQuantityLabel(context) {
+    return finite(context?.quantity) ? `${formatNumber(context.quantity)} held` : "Hold to review";
+  }
+
+  function renderIncidentStrip(next) {
+    const context = selectedProblemContext(next);
+    const active = $("ops-active-incident");
+    const statusContext = $("ops-case-context");
+    const purchaseOrder = purchaseOrderDisplay(next) || next?.case_label || (next?.available ? "Current operation" : "PO unavailable");
+    if (context.incidentOpen && context.lot) {
+      setText("ops-case-context", "Active incident");
+      setText("ops-case-label", `${context.lot} · ${incidentQuantityLabel(context)}`);
+      setText("ops-active-incident-title", "Inspection needed");
+      setText("ops-active-incident-detail", [context.customerOrder || "Orders in this case", context.eventId ? "Open alert" : ""].filter(Boolean).join(" · "));
+      if (active) {
+        active.hidden = false;
+        active.href = selectedLotHref(context.lot, "ops-evidence-panel");
+      }
+    } else {
+      if (statusContext) statusContext.textContent = "Order status";
+      setText("ops-case-label", purchaseOrder);
+      if (active) {
+        active.hidden = true;
+        active.removeAttribute("href");
+      }
+    }
+  }
+
+  function lotContextSummary(next, context) {
+    if (!context.lot) return "No current lot context";
+    if (context.incidentOpen) return [context.lot, incidentQuantityLabel(context), "Inspection needed"].filter(Boolean).join(" · ");
+    const state = context.lotRecord ? batchState(next, context.lotRecord) : null;
+    return [context.lot, state?.label || "Inspection not recorded"].filter(Boolean).join(" · ");
+  }
+
+  function renderLotContext(next, targetId) {
+    const target = $(targetId);
+    if (!target) return;
+    const context = selectedProblemContext(next);
+    target.hidden = !context.lot;
+    target.replaceChildren();
+    if (!context.lot) return;
+    const label = document.createElement("span");
+    label.className = "object-label";
+    label.textContent = "Selected batch";
+    const summary = document.createElement("strong");
+    summary.textContent = lotContextSummary(next, context);
+    target.append(label, summary);
+  }
+
+  function currentCaseDocumentByName(next, name) {
+    const target = text(name);
+    return target
+      ? currentCaseDocuments(next).find((record) => firstText(record, ["name", "record_id", "id"]) === target) || null
+      : null;
+  }
+
+  function appendCaseReference(parent, label, value, documentRecord = null) {
+    if (!value) return;
+    const href = safeHref(documentRecord?.url || documentRecord?.href);
+    const node = href ? document.createElement("a") : document.createElement("span");
+    node.className = "ops-agent-case-reference";
+    node.textContent = `${label} ${value}`;
+    if (href) {
+      node.href = href;
+      node.target = "_blank";
+      node.rel = "noopener noreferrer";
+    }
+    parent.append(node);
+  }
+
+  function matchingCurrentLotPhoto(next, lot) {
+    if (!lot) return null;
+    return photoAttachmentList(next).find((photo) => {
+      const analysis = isRecord(photo?.analysis) ? photo.analysis : {};
+      return photoAnalysisStatus(analysis) === "COMPLETE"
+        && analysis.advisory_current !== false
+        && firstText(analysis, ["linked_lot"]) === lot;
+    }) || null;
+  }
+
+  function renderAgentCaseBrief(next) {
+    const panel = $("ops-agent-case-brief");
+    const copy = $("ops-agent-case-brief-copy");
+    const prompts = $("ops-agent-context-prompts");
+    if (!panel || !copy || !prompts) return;
+    const context = selectedProblemContext(next);
+    panel.hidden = !context.incidentOpen;
+    copy.replaceChildren();
+    prompts.replaceChildren();
+    if (!context.incidentOpen) return;
+    const header = document.createElement("div");
+    header.className = "ops-agent-case-brief-head";
+    const label = document.createElement("span"); label.className = "object-label"; label.textContent = "Case brief";
+    const title = document.createElement("strong"); title.textContent = lotContextSummary(next, context);
+    header.append(label, title);
+    const records = document.createElement("div"); records.className = "ops-agent-case-records";
+    const purchaseOrder = purchaseOrderDisplay(next);
+    const purchaseOrderId = purchaseOrder.replace(/^PO\s+/, "");
+    const purchaseDoc = currentCaseDocumentByName(next, purchaseOrderId) || currentCaseDocumentByName(next, purchaseOrder);
+    appendCaseReference(records, "PO", purchaseOrderId, purchaseDoc);
+    if (context.customerOrder) {
+      appendCaseReference(records, "SO", context.customerOrder, currentCaseDocumentByName(next, context.customerOrder));
+      if (finite(context.quantity)) {
+        const remaining = document.createElement("span"); remaining.className = "ops-agent-case-reference"; remaining.textContent = `${formatNumber(context.quantity)} remaining`; records.append(remaining);
+      }
+    } else if (Array.isArray(next?.allocations) && next.allocations.filter(isRecord).length > 1) {
+      const scope = document.createElement("span"); scope.className = "ops-agent-case-reference"; scope.textContent = "Orders in this case"; records.append(scope);
+    }
+    const chips = document.createElement("div"); chips.className = "ops-agent-case-chips";
+    if (matchingCurrentLotPhoto(next, context.lot)) {
+      const photo = document.createElement("span"); photo.textContent = "Photo checked"; chips.append(photo);
+    }
+    const inspection = document.createElement("span"); inspection.textContent = context.inspection || "Inspection needed"; chips.append(inspection);
+    copy.append(header, records, chips);
+    [
+      ["Why is this held?", "Why is this held?"],
+      ["What can move?", "What can move now?"],
+      ["What is needed?", "What is needed to release this lot?"],
+    ].forEach(([labelText, question]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button button-quiet";
+      button.textContent = labelText;
+      button.addEventListener("click", () => {
+        const input = $("ops-question");
+        if (!input) return;
+        input.value = contextualLotQuestion(question);
+        input.focus();
+      });
+      prompts.append(button);
+    });
+  }
+
+  function renderIncidentWorkflow(next) {
+    const workflow = $("ops-incident-workflow");
+    if (!workflow) return;
+    const context = selectedProblemContext(next);
+    workflow.hidden = !context.incidentOpen;
+    if (!context.incidentOpen) return;
+    const photoReviewed = Boolean(matchingCurrentLotPhoto(next, context.lot));
+    const checked = Boolean(lastErpCheckAt && text(next?.evidence_mode?.status).toUpperCase() === "CURRENT");
+    workflow.querySelectorAll("button[data-incident-step]").forEach((button) => {
+      const step = button.dataset.incidentStep;
+      const complete = step === "review" ? photoReviewed : step === "records" ? checked : false;
+      button.classList.toggle("is-complete", complete);
+      button.setAttribute("aria-label", `${button.textContent}${complete ? " complete" : ""}`);
+      button.onclick = () => {
+        if (step === "review") applyProblemLot(next, context.lot, { target: "ops-evidence-panel" });
+        else if (step === "agent") openAgentDrawer(button);
+        else if (step === "action") focusOpsTarget("ops-economic-panel");
+        else if (step === "records") openEvidenceDrawer(button);
+      };
+    });
+  }
+
+  function renderProblemLotSurfaces(next) {
+    renderHeaderIncidentState(next);
+    renderIncidentStrip(next);
+    renderLotContext(next, "ops-problem-lot-findings");
+    renderOverview(next);
+    renderPhotos(next);
+    renderEconomicProposal(next);
+    renderAgentCaseBrief(next);
+    renderIncidentWorkflow(next);
   }
 
   function renderHero(next) {
@@ -1777,7 +2123,7 @@
     const title = !available
       ? "Operation facts unavailable"
       : view === "operations"
-          ? "Receive & fulfill"
+          ? "Review incoming goods"
           : finite(usable)
             ? usable > 0 ? `${formatNumber(usable)} ${unit} ready to ship` : finite(dispatched) && dispatched > 0 ? `${formatNumber(dispatched)} ${unit} dispatched` : `${formatNumber(usable)} ${unit} ready to ship`
             : finite(received)
@@ -1798,7 +2144,7 @@
               : purchaseOrder
                 ? `Order ${purchaseOrder}`
                 : "Current order status";
-    const context = view === "operations" ? "Receive & fulfill" : "Overview";
+    const context = view === "operations" ? "Shipment workspace" : "Overview";
     setText("ops-hero-context", context);
     setText("ops-title", title);
     setText("ops-hero-copy", copy);
@@ -1838,58 +2184,86 @@
     parent.append(row);
   }
 
+  function currentCaseDocuments(next) {
+    const records = [];
+    const add = (record, fallbackStatus = "") => {
+      if (!isRecord(record)) return;
+      const name = firstText(record, ["name", "record_id", "id"]);
+      const kind = firstText(record, ["kind", "doctype", "type"]);
+      if (!name && !kind) return;
+      records.push({
+        ...record,
+        name: name || kind,
+        kind: kind || "ERP record",
+        status: firstText(record, ["status", "state"]) || fallbackStatus || "Status unavailable",
+      });
+    };
+    (Array.isArray(next?.documents) ? next.documents : []).forEach((record) => add(record));
+    (Array.isArray(next?.events) ? next.events : []).forEach((event) => {
+      const eventStatus = firstText(event, ["status", "state"]);
+      const operations = Array.isArray(event?.operations) ? event.operations : [];
+      operations.filter(isRecord).forEach((operation) => {
+        const operationStatus = firstText(operation, ["status", "state"]) || eventStatus;
+        (Array.isArray(operation.documents) ? operation.documents : []).forEach((record) => add(record, operationStatus));
+      });
+    });
+    const unique = new Map();
+    records.forEach((record) => {
+      const key = [record.kind, record.name, safeHref(record.url || record.href)].join("|");
+      if (!unique.has(key)) unique.set(key, record);
+    });
+    const priority = ["Purchase Order", "Sales Order", "Purchase Receipt", "Inspection", "Quality Inspection", "Delivery Note", "Pick List", "Shipment"];
+    return [...unique.values()].sort((left, right) => {
+      const leftIndex = priority.findIndex((kind) => kind.toLowerCase() === text(left.kind).toLowerCase());
+      const rightIndex = priority.findIndex((kind) => kind.toLowerCase() === text(right.kind).toLowerCase());
+      const leftRank = leftIndex < 0 ? priority.length : leftIndex;
+      const rightRank = rightIndex < 0 ? priority.length : rightIndex;
+      return leftRank - rightRank || text(left.name).localeCompare(text(right.name));
+    });
+  }
+
+  function appendErpRecord(parent, record) {
+    const row = document.createElement("div");
+    row.className = "ops-erp-record";
+    const identity = document.createElement("div");
+    const kind = document.createElement("small"); kind.textContent = record.kind || "ERP record";
+    const href = safeHref(record.url || record.href);
+    const name = href ? document.createElement("a") : document.createElement("strong");
+    name.textContent = record.name || "Record unavailable";
+    if (href) {
+      name.href = href;
+      name.target = "_blank";
+      name.rel = "noopener noreferrer";
+    }
+    identity.append(kind, name);
+    const status = document.createElement("span");
+    status.className = `state-badge state-${statusTone(record.status)}`;
+    status.textContent = pretty(record.status || "Status unavailable");
+    row.append(identity, status);
+    parent.append(row);
+  }
+
   function renderEvidenceDrawer(next) {
     const list = $("ops-evidence-drawer-facts");
     if (!list) return;
-    const unit = displayUnit(next?.quantities?.uom);
-    const received = quantity(next, "received");
-    const dispatched = quantity(next, "dispatched");
-    const confirmed = quantity(next, "delivery_confirmed");
-    const photos = photoAttachmentList(next);
-    const purchaseOrderRecordValue = purchaseOrderRecord(next);
-    const purchaseOrder = purchaseOrderDisplay(next);
-    setText("ops-evidence-drawer-status", evidenceStatusLabel(next));
+    const sourceCurrent = text(next?.evidence_mode?.status).toUpperCase() === "CURRENT";
+    const checked = lastErpCheckAt
+      ? `${sourceCurrent ? "Current ERP read" : "Source read"} · ${formatDate(lastErpCheckAt)}`
+      : "Case records";
+    setText("ops-evidence-drawer-status", checked);
     list.replaceChildren();
-    appendEvidenceDrawerFact(list, "Case", next?.case_id || "Case identifier unavailable");
-    appendEvidenceDrawerFact(list, "Purchase order", purchaseOrder || "Purchase order unavailable", purchaseOrderRecordValue?.url || purchaseOrderRecordValue?.href);
-    appendEvidenceDrawerFact(list, "Evidence state", evidenceStatusLabel(next));
-    appendEvidenceDrawerFact(list, "Receiving", finite(received) ? `${formatNumber(received)} ${unit}` : "Unknown");
-    appendEvidenceDrawerFact(list, "Dispatch", finite(dispatched) ? `${formatNumber(dispatched)} ${unit}` : "Unknown");
-    appendEvidenceDrawerFact(list, "Carrier confirmation", finite(confirmed)
-      ? carrierConfirmationLabel(next, confirmed, quantity(next, "ordered"))
-      : "Unknown");
-    appendEvidenceDrawerFact(list, "Photo evidence", photos.length
-      ? `${photos.length} attached receiving evidence photo${photos.length === 1 ? "" : "s"}; manual photo · not analyzed.`
-      : "No same-case source-backed photo is available.");
-    groupHandoffs(next?.handoffs).forEach((group) => {
-      const latest = group.latest;
-      appendEvidenceDrawerFact(
-        list,
-        `${group.provider} readback`,
-        latest.record_id || `${pretty(latest.status || "Status unavailable")} record`,
-        latest.safe_url,
-      );
-    });
-    const proposal = economicProposalFrom(next);
-    if (economicConfigured && proposal) {
-      const sources = economicSourceEntries(proposal);
-      appendEvidenceDrawerFact(list, "Economic proposal", pretty(proposal.status || "Status unavailable"));
-      if (isRecord(proposal.proposal_effect)) {
-        const effect = Object.entries(proposal.proposal_effect)
-          .map(([key, value]) => `${pretty(key)} ${economicValueText(value, "")}`)
-          .filter((value) => !value.endsWith(" "))
-          .join(" · ");
-        if (effect) appendEvidenceDrawerFact(list, "Economic proposal effect", effect);
-      }
-      sources.forEach((source) => {
-        const label = firstText(source, ["label", "source_id"]) || "Economic source";
-        const detail = [
-          firstText(source, ["kind"]),
-          firstText(source, ["checked_at"]),
-          safeHref(firstText(source, ["ref", "url", "href"])) ? "" : firstText(source, ["ref", "url", "href"]),
-        ].filter(Boolean).join(" · ") || "Source reference recorded";
-        appendEvidenceDrawerFact(list, `Economic evidence · ${label}`, detail, firstText(source, ["ref", "url", "href"]));
-      });
+    const records = currentCaseDocuments(next);
+    if (records.length) records.forEach((record) => appendErpRecord(list, record));
+    else list.append(emptyList("No current ERP record links were returned for this case."));
+    const context = selectedProblemContext(next);
+    const photo = matchingCurrentLotPhoto(next, context.lot);
+    const analysis = isRecord(photo?.analysis) ? photo.analysis : null;
+    if (analysis) {
+      const note = document.createElement("p");
+      note.className = "ops-erp-record-note";
+      const lot = photoLinkedLot(photo);
+      note.textContent = `Photo check ${pretty(photoAnalysisStatus(analysis) || "status unavailable")}${lot ? ` · ${lot}` : ""}`;
+      list.append(note);
     }
   }
 
@@ -1923,7 +2297,7 @@
     parent.append(badge);
   }
 
-  function renderEconomicModel(proposal) {
+  function renderEconomicModel(proposal, { completed = false } = {}) {
     const model = isRecord(proposal?.model) ? proposal.model : {};
     const status = text(model.status).toUpperCase();
     const provider = isRecord(model.provider) ? model.provider : {};
@@ -1935,9 +2309,20 @@
       firstText(provider, ["region"]),
       finite(numberFrom(usage.elapsed_ms)) ? `${formatNumber(numberFrom(usage.elapsed_ms))} ms` : "",
     ].filter(Boolean).join(" · ");
+    const modelPanel = $("ops-economic-model");
+    const rawDecision = text(model.decision);
+    const meaningfulHistoricalDecision = Boolean(rawDecision && status !== "NOT_RUN" && !/decision unavailable|model unavailable/i.test(rawDecision));
+    if (modelPanel) modelPanel.hidden = completed && !meaningfulHistoricalDecision;
     // Keep provider, model, region, and timing in the source projection only.
     setText("ops-economic-model-identity", "");
-    setText("ops-economic-model-title", "Agent recommendation");
+    setText("ops-economic-model-title", completed ? "Original decision evidence" : "Agent recommendation");
+    if (completed && !meaningfulHistoricalDecision) {
+      setText("ops-economic-model-decision", "");
+      $("ops-economic-model-note")?.setAttribute("hidden", "");
+      $("ops-economic-model-citations")?.replaceChildren();
+      $("ops-economic-model-trace")?.setAttribute("hidden", "");
+      return;
+    }
     const decision = status === "NOT_RUN"
       ? "No agent comparison yet."
       : economicValueText(model.decision, "Decision unavailable from the source.");
@@ -1983,16 +2368,46 @@
     }
   }
 
-  function renderEconomicGate(proposal) {
+  function renderEconomicGate(proposal, next, { completed = false } = {}) {
     const gate = isRecord(proposal?.deterministic_gate) ? proposal.deterministic_gate : {};
     const status = text(gate.status).toUpperCase();
     const badge = $("ops-economic-gate-status");
+    const title = $("ops-economic-gate-title");
+    const details = $("ops-economic-gate-details");
+    if (completed) {
+      const context = selectedProblemContext(next);
+      const dispatched = quantity(next, "dispatched");
+      const recordedDispatch = finite(dispatched)
+        ? `${formatNumber(dispatched)} dispatched remains recorded separately`
+        : "The completed dispatch remains recorded separately.";
+      if (title) title.textContent = "Requirements for another dispatch";
+      if (badge) {
+        badge.className = `state-badge state-${context.incidentOpen ? "amber" : "neutral"}`;
+        badge.textContent = context.incidentOpen ? "Review hold" : "No next dispatch";
+      }
+      if (!details) return;
+      details.replaceChildren();
+      const values = context.incidentOpen
+        ? [
+          ["Remaining lot", lotContextSummary(next, context)],
+          ["What is needed", context.inspection],
+          ["Recorded dispatch", recordedDispatch],
+        ]
+        : [["Recorded dispatch", recordedDispatch]];
+      values.forEach(([label, value]) => {
+        const item = document.createElement("div"); item.className = "ops-economic-gate-detail";
+        const name = document.createElement("strong"); name.textContent = label;
+        const copy = document.createElement("span"); copy.textContent = value;
+        item.append(name, copy); details.append(item);
+      });
+      return;
+    }
+    if (title) title.textContent = "Dispatch checks";
     if (badge) {
       const tone = /FAIL|BLOCK|ERROR|REJECT/.test(status) ? "coral" : /PASS|READY|ALLOW|EXECUT/.test(status) ? "lime" : "amber";
       badge.className = `state-badge state-${tone}`;
       badge.textContent = status ? pretty(status) : "Status unavailable";
     }
-    const details = $("ops-economic-gate-details");
     if (!details) return;
     details.replaceChildren();
     const reasons = economicValueText(gate.reasons, "Reasons unavailable from source.");
@@ -2156,9 +2571,14 @@
         finite(snapshot.ready) ? `${formatNumber(snapshot.ready)} ready` : "",
         finite(snapshot.awaiting_release) ? `${formatNumber(snapshot.awaiting_release)} awaiting release` : "",
       ]).filter(Boolean);
-    setText("ops-economic-subtitle", subtitle.length
-      ? `${subtitle.join(" · ")}. Compare a supported dispatch with a conditional consolidation path.`
-      : "Compare dispatch paths against the current order evidence.");
+    const remainingContext = selectedProblemContext(next);
+    setText("ops-economic-subtitle", completedEconomicProposal
+      ? remainingContext.incidentOpen
+        ? `${lotContextSummary(next, remainingContext)}. ${remainingContext.inspection}.`
+        : "The recorded dispatch is shown below."
+      : subtitle.length
+        ? `${subtitle.join(" · ")}. Compare a supported dispatch with a conditional consolidation path.`
+        : "Compare dispatch paths against the current order evidence.");
     const selection = $("ops-economic-selection");
     if (selection) {
       const selected = text(proposal.selected_candidate_id);
@@ -2214,8 +2634,8 @@
       values.forEach((source, index) => renderEconomicSource(sources, source, index));
       if (!values.length) sources.append(emptyList("No economic source evidence references were supplied."));
     }
-    renderEconomicModel(proposal);
-    renderEconomicGate(proposal);
+    renderEconomicModel(proposal, { completed: completedEconomicProposal });
+    renderEconomicGate(proposal, next, { completed: completedEconomicProposal });
     if (/^(APPLIED|ALREADY_APPLIED)$/.test(appliedStatus)) {
       setEconomicFeedback(
         `${economicEffectSummary(proposal, next) || `Native readback ${pretty(appliedStatus)}`}. Current native readback is shown below; no physical delivery or postage payment occurred.`,
@@ -2263,7 +2683,7 @@
     backdrop.hidden = false;
     drawer.hidden = false;
     document.body.classList.add("has-evidence-drawer");
-    $("ops-open-evidence-drawer")?.setAttribute("aria-expanded", "true");
+    if (trigger?.setAttribute) trigger.setAttribute("aria-expanded", "true");
     window.requestAnimationFrame(() => $("ops-evidence-drawer-close")?.focus());
   }
 
@@ -2306,15 +2726,15 @@
     drawer.hidden = true;
     if (backdrop) backdrop.hidden = true;
     document.body.classList.remove("has-evidence-drawer");
-    $("ops-open-evidence-drawer")?.setAttribute("aria-expanded", "false");
     const trigger = evidenceDrawerTrigger;
     evidenceDrawerTrigger = null;
+    if (trigger?.setAttribute) trigger.setAttribute("aria-expanded", "false");
     if (trigger && document.contains(trigger) && typeof trigger.focus === "function") trigger.focus();
   }
 
   function openFullOperationsEvidence() {
     closeEvidenceDrawer();
-    focusOpsTarget("ops-details");
+    focusOpsTarget("ops-evidence-panel");
   }
 
   function renderUnavailablePresentation() {
@@ -2446,11 +2866,18 @@
       if (alert) {
         const evidence = document.createElement("a");
         evidence.className = "ops-stage-alert-link";
-        evidence.href = `#ops-alert-${alert.index}`;
-        evidence.textContent = alertStage(alert) === "inspection" ? "Review hold" : "Review alert";
+        const sourceAlert = next.alerts.find((candidate) => isRecord(candidate)
+          && alert.eventId
+          && firstText(candidate, ["event_id", "event", "source_event_id"]) === alert.eventId)
+          || next.alerts[alert.index]
+          || alert;
+        const alertLot = openAlertLot(next, sourceAlert);
+        evidence.href = alertLot ? selectedLotHref(alertLot, "ops-evidence-panel") : `#ops-alert-${alert.index}`;
+        evidence.textContent = alertStage(sourceAlert) === "inspection" ? "Review hold" : "Review alert";
         evidence.addEventListener("click", (event) => {
           event.preventDefault();
-          focusOpsTarget(`ops-alert-${alert.index}`);
+          if (alertLot) applyProblemLot(next, alertLot, { target: "ops-evidence-panel" });
+          else focusOpsTarget(`ops-alert-${alert.index}`);
         });
         item.append(evidence);
       }
@@ -2487,6 +2914,9 @@
     if (projection) {
       renderHero(projection);
       renderPhotos(projection);
+      renderLotContext(projection, "ops-problem-lot-findings");
+      renderAgentCaseBrief(projection);
+      renderIncidentWorkflow(projection);
     }
     if (normalized === "operations" && scrollTarget === "ops-economic-panel") {
       const economicPanel = $("ops-economic-panel");
@@ -2625,7 +3055,10 @@
   function renderFindings(next, activeAlerts = []) {
     const panel = $("ops-findings-summary");
     if (!panel) return;
-    const alerts = activeAlerts.filter(isRecord).slice(0, 2);
+    const context = selectedProblemContext(next);
+    const alerts = (context.lot
+      ? activeAlerts.filter((alert) => openAlertLot(next, alert) === context.lot)
+      : activeAlerts.filter(isRecord)).slice(0, 2);
     const affectedOrders = next.allocations
       .filter(isRecord)
       .filter((allocation) => {
@@ -2651,7 +3084,7 @@
         const message = firstText(alert, ["message", "detail", "summary"]);
         const qualityIssue = /QUALITY.*(EVIDENCE|REQUIRED)|INSPECTION.*(REQUIRED|PENDING)/.test(`${code} ${message}`.toUpperCase());
         if (qualityIssue) {
-          const held = quantity(next, "held");
+          const held = incidentQuantity(next, alert, openAlertLot(next, alert));
           row.textContent = `${finite(held) && held > 0 ? `${formatNumber(held)} held · ` : ""}Inspection needed`;
         } else if (message && !/^[A-Z0-9_-]+$/.test(message)) {
           row.textContent = message;
@@ -2664,7 +3097,9 @@
     }
     if (affectedOrders.length) {
       const group = document.createElement("div"); group.className = "ops-finding-group";
-      const label = document.createElement("span"); label.className = "object-label"; label.textContent = "Affected orders"; group.append(label);
+      const label = document.createElement("span"); label.className = "object-label";
+      label.textContent = context.incidentOpen && context.customerOrder ? "Affected order" : "Orders in this case";
+      group.append(label);
       affectedOrders.forEach((allocation) => {
         const row = document.createElement("p");
         const order = firstText(allocation, ["customer_order", "order_id", "sales_order", "order"]);
@@ -3972,9 +4407,11 @@
   function renderPhotoReviewCard(parent, next, attachment = null) {
     if (!parent) return;
     const card = isRecord(next?.photo_review_card) ? next.photo_review_card : null;
+    const selectedLot = selectedProblemContext(next).lot;
+    const cardLot = firstText(card?.selected_lot, ["lot", "lot_id", "batch", "batch_no"]);
     parent.replaceChildren();
-    parent.hidden = !card;
-    if (!card) return;
+    parent.hidden = !card || Boolean(selectedLot && cardLot && selectedLot !== cardLot);
+    if (parent.hidden) return;
     const header = document.createElement("header"); header.className = "ops-photo-review-header";
     const heading = document.createElement("div");
     const title = document.createElement("strong"); title.textContent = "Receiving check";
@@ -4161,6 +4598,10 @@
       .map(([key, label]) => ({ key, label, check: isRecord(checks[key]) ? checks[key] : null }))
       .filter((entry) => entry.check);
     if (!entries.length) return;
+    const purpose = text(analysis?.purpose).toLowerCase();
+    const noApplicableIdentity = ["detail", "overview"].includes(purpose)
+      && entries.every(({ check }) => photoCheckStatus(check.status) === "NOT_APPLICABLE" && !firstText(check, ["observed"]));
+    if (noApplicableIdentity) return;
     const wrapper = document.createElement("div"); wrapper.className = "ops-photo-checks";
     const heading = document.createElement("strong"); heading.textContent = "Observed identity against ERP"; wrapper.append(heading);
     entries.forEach(({ label, check }) => {
@@ -4249,9 +4690,10 @@
     return finite(quantityValue) ? `${formatNumber(quantityValue)} ${unit}` : "ERP quantity unavailable from the source.";
   }
 
-  function renderPhotoAnalysisStages(parent, analysis) {
+  function renderPhotoAnalysisStages(parent, analysis, disclosureKey = "") {
     if (!Array.isArray(analysis?.stages) || !analysis.stages.length) return;
     const details = document.createElement("details"); details.className = "ops-photo-analysis-stages";
+    if (disclosureKey) details.dataset.opsDisclosureKey = disclosureKey;
     const summary = document.createElement("summary"); summary.textContent = "View model stages"; details.append(summary);
     const list = document.createElement("ul");
     analysis.stages.filter(isRecord).forEach((stage) => {
@@ -4266,11 +4708,12 @@
     parent.append(details);
   }
 
-  function renderPhotoAnalysisEvidence(parent, analysis) {
+  function renderPhotoAnalysisEvidence(parent, analysis, disclosureBase = "") {
     const provenance = photoAnalysisProvenance(analysis);
     const hasStages = Array.isArray(analysis?.stages) && analysis.stages.length > 0;
     if (!provenance && !hasStages) return;
     const details = document.createElement("details"); details.className = "ops-photo-analysis-evidence";
+    if (disclosureBase) details.dataset.opsDisclosureKey = `${disclosureBase}:evidence`;
     const summary = document.createElement("summary"); summary.textContent = "View source and model evidence"; details.append(summary);
     if (provenance) {
       const provenanceNode = document.createElement("p"); provenanceNode.className = "ops-photo-analysis-provenance";
@@ -4278,7 +4721,7 @@
     }
     if (hasStages) {
       const stages = document.createElement("div");
-      renderPhotoAnalysisStages(stages, analysis);
+      renderPhotoAnalysisStages(stages, analysis, disclosureBase ? `${disclosureBase}:stages` : "");
       if (stages.firstElementChild) details.append(stages.firstElementChild);
     }
     parent.append(details);
@@ -4377,6 +4820,8 @@
       section.append(conflict);
     }
     const details = document.createElement("details"); details.className = "ops-photo-analysis-details";
+    const attachment = text(photo?.attachment_id);
+    if (attachment) details.dataset.opsDisclosureKey = `photo:${attachment}:observation`;
     const detailsSummary = document.createElement("summary"); detailsSummary.textContent = "View observation details"; details.append(detailsSummary);
     const richObservation = document.createElement("p"); richObservation.className = "ops-photo-analysis-observation";
     const richObservationLabel = document.createElement("strong"); richObservationLabel.textContent = "Observation detail: ";
@@ -4396,7 +4841,7 @@
     const note = document.createElement("p"); note.className = "ops-photo-analysis-note";
     note.textContent = "Visible evidence only · hidden contents, dimensions, and quality clearance are not inferred; no stock update occurred.";
     details.append(note);
-    renderPhotoAnalysisEvidence(details, analysis);
+    renderPhotoAnalysisEvidence(details, analysis, attachment ? `photo:${attachment}` : "");
     section.append(details);
     parent.append(section); return section;
   }
@@ -4413,6 +4858,17 @@
     if (photoAnalysisPending || processingEvent) return;
     const attachmentId = text(photo?.attachment_id);
     if (!attachmentId) return;
+    const linkedLot = photoLinkedLot(photo);
+    let contextChanged = false;
+    if (linkedLot && currentLotNames(next).includes(linkedLot)) {
+      contextChanged = linkedLot !== selectedProblemLot;
+      applyProblemLot(next, linkedLot, { history: "replace", render: false });
+    }
+    if (next?.case_id) {
+      agentPhotoAttachmentId = attachmentId;
+      agentPhotoCaseId = next.case_id;
+      persistAgentPhoto(next.case_id, attachmentId);
+    }
     resetSelectedPhoto();
     selectedPhotoAttachmentId = attachmentId;
     const analysis = isRecord(photo?.analysis) ? photo.analysis : null;
@@ -4428,7 +4884,8 @@
       "Attached case receiving photo; visible evidence only",
       "Existing case photo selected · ready to review or retry analysis.",
     );
-    renderPhotoIntake(next || projection);
+    if (contextChanged) renderProblemLotSurfaces(next || projection);
+    else renderPhotoIntake(next || projection);
     document.querySelector(".ops-photo-intake-link")?.click();
   }
 
@@ -4487,6 +4944,7 @@
   }
 
   function renderPhotoIntake(next) {
+    reconcileSelectedPhotoContext(next);
     renderPhotoPurpose(next);
     renderPhotoLotOptions(next);
     const input = $("ops-photo-file");
@@ -4531,9 +4989,68 @@
     if (inlineDetails) inlineDetails.hidden = Boolean(inlineReview?.hidden);
   }
 
-  function latestPhoto(photos) {
-    const overviewPhotos = photos.filter((photo) => text(photo?.analysis?.purpose).toLowerCase() === "overview");
-    const candidates = overviewPhotos.length ? overviewPhotos : photos;
+  function photoLinkedLot(photo) {
+    const analysis = isRecord(photo?.analysis) ? photo.analysis : {};
+    return text(analysis.linkage_source).toUpperCase() === "OPERATOR_SELECTED"
+      ? firstText(analysis, ["linked_lot"])
+      : "";
+  }
+
+  function agentPhotoMatchesProblemLot(next) {
+    if (!agentPhotoAttachmentId || agentPhotoCaseId !== text(next?.case_id)) return false;
+    const attachment = photoAttachmentList(next)
+      .find((photo) => text(photo?.attachment_id) === agentPhotoAttachmentId);
+    const linkedLot = photoLinkedLot(attachment);
+    return !linkedLot || !selectedProblemLot || linkedLot === selectedProblemLot;
+  }
+
+  function reconcileAgentPhotoContext(next) {
+    if (!agentPhotoAttachmentId || agentPhotoCaseId !== text(next?.case_id)) return;
+    const attachment = photoAttachmentList(next)
+      .find((photo) => text(photo?.attachment_id) === agentPhotoAttachmentId);
+    const linkedLot = photoLinkedLot(attachment);
+    if (!linkedLot || !selectedProblemLot || linkedLot === selectedProblemLot) return;
+    clearStoredAgentPhoto(agentPhotoCaseId);
+    agentPhotoAttachmentId = "";
+    agentPhotoCaseId = "";
+    setAgentUploadStatus("");
+  }
+
+  function reconcileSelectedPhotoContext(next) {
+    if (!selectedPhotoAttachmentId || !selectedProblemLot) return;
+    const attachment = photoAttachmentList(next)
+      .find((photo) => text(photo?.attachment_id) === selectedPhotoAttachmentId);
+    const linkedLot = photoLinkedLot(attachment);
+    if (!linkedLot || linkedLot === selectedProblemLot) return;
+    resetSelectedPhoto();
+  }
+
+  function photoIsCurrent(photo) {
+    const analysis = isRecord(photo?.analysis) ? photo.analysis : null;
+    return !analysis || analysis.advisory_current !== false;
+  }
+
+  function orderedPhotosForContext(next, photos) {
+    const context = selectedProblemContext(next);
+    return [...photos].sort((left, right) => {
+      const leftRelevant = context.lot && photoLinkedLot(left) === context.lot ? 1 : 0;
+      const rightRelevant = context.lot && photoLinkedLot(right) === context.lot ? 1 : 0;
+      if (leftRelevant !== rightRelevant) return rightRelevant - leftRelevant;
+      const leftCurrent = photoIsCurrent(left) ? 1 : 0;
+      const rightCurrent = photoIsCurrent(right) ? 1 : 0;
+      if (leftCurrent !== rightCurrent) return rightCurrent - leftCurrent;
+      const leftTime = Date.parse(text(left?.recorded_at));
+      const rightTime = Date.parse(text(right?.recorded_at));
+      if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return rightTime - leftTime;
+      return text(right?.attachment_id).localeCompare(text(left?.attachment_id));
+    });
+  }
+
+  function latestPhoto(photos, lot = selectedProblemLot) {
+    const matchingLot = lot ? photos.filter((photo) => photoLinkedLot(photo) === lot) : [];
+    const overviewPhotos = (matchingLot.length ? matchingLot : photos)
+      .filter((photo) => text(photo?.analysis?.purpose).toLowerCase() === "overview");
+    const candidates = overviewPhotos.length ? overviewPhotos : matchingLot.length ? matchingLot : photos;
     return candidates.reduce((latest, photo) => {
       if (!latest) return photo;
       const currentTime = Date.parse(text(photo.recorded_at));
@@ -4611,51 +5128,222 @@
       || firstText(assessment, ["item_code"]);
   }
 
-  function renderReceivingSummary(next, photos = photoAttachmentList(next)) {
-    const panel = $("ops-receiving-summary");
+  function linkedLotPhotos(next, lot) {
+    const target = text(lot);
+    return photoAttachmentList(next)
+      .filter((photo) => target && photoLinkedLot(photo) === target)
+      .sort((left, right) => {
+        const leftCurrent = photoIsCurrent(left) ? 1 : 0;
+        const rightCurrent = photoIsCurrent(right) ? 1 : 0;
+        if (leftCurrent !== rightCurrent) return rightCurrent - leftCurrent;
+        const leftDetail = text(left?.analysis?.purpose).toLowerCase() === "detail" ? 1 : 0;
+        const rightDetail = text(right?.analysis?.purpose).toLowerCase() === "detail" ? 1 : 0;
+        if (leftDetail !== rightDetail) return rightDetail - leftDetail;
+        const leftTime = Date.parse(text(left?.recorded_at));
+        const rightTime = Date.parse(text(right?.recorded_at));
+        if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return rightTime - leftTime;
+        return text(right?.attachment_id).localeCompare(text(left?.attachment_id));
+      });
+  }
+
+  function latestLotPhoto(next, lot) {
+    return linkedLotPhotos(next, lot)[0] || null;
+  }
+
+  function lotInspectionState(next, lot) {
+    const name = currentLotName(lot);
+    const inspection = [...(Array.isArray(next?.events) ? next.events : [])]
+      .reverse()
+      .find((event) => isRecord(event)
+        && firstText(event, ["lot", "lot_id", "batch", "batch_no"]) === name
+        && canonicalType(firstText(event, ["type", "event_type", "kind"])) === "inspection"
+        && /APPLIED|COMPLETE|SUCCESS|RECORDED/i.test(firstText(event, ["status", "state"])));
+    const result = firstText(inspection, ["result", "inspection_result", "quality_result"]).toUpperCase();
+    if (/PASS|ACCEPT/.test(result)) return { group: "passed", label: "Inspection passed", event: inspection };
+    if (/FAIL|REJECT/.test(result)) return { group: "attention", label: "Inspection needs review", event: inspection };
+    return { group: "attention", label: "Inspection not recorded", event: null };
+  }
+
+  function batchState(next, lot) {
+    const name = currentLotName(lot);
+    const held = numberFromKeys(lot, ["held", "held_quantity", "on_hold"]);
+    const incident = openIncidentAlert(next, name);
+    if (incident || finite(held) && held > 0) return { group: "attention", label: "Inspection needed", tone: "amber" };
+    const inspection = lotInspectionState(next, lot);
+    return { ...inspection, tone: inspection.group === "passed" ? "lime" : "amber" };
+  }
+
+  function batchItemCode(next, lot, photo) {
+    const name = currentLotName(lot);
+    const event = (Array.isArray(next?.events) ? next.events : [])
+      .find((item) => isRecord(item) && firstText(item, ["lot", "lot_id", "batch", "batch_no"]) === name) || {};
+    return firstText(lot, ["item_code", "item", "sku"])
+      || firstText(event, ["item_code", "item", "sku"])
+      || receivingItemCode(next, photo);
+  }
+
+  function batchItemLabel(itemCode) {
+    return /(?:^|[-_])(?:DIST[-_])?COMPONENT(?:[-_]|$)/i.test(text(itemCode))
+      ? "Component parts"
+      : itemCode || "Item unavailable";
+  }
+
+  function batchQuantityLabel(lot, unit) {
+    const received = numberFromKeys(lot, ["received", "received_quantity", "quantity"]);
+    const held = numberFromKeys(lot, ["held", "held_quantity", "on_hold"]);
+    return [
+      finite(received) ? `${formatNumber(received)} ${unit} received` : "Quantity unavailable",
+      finite(held) && held > 0 ? `${formatNumber(held)} held` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function renderBatchCards(next) {
+    const panel = $("ops-batch-cards");
     if (!panel) return;
     panel.replaceChildren();
-    const latest = latestPhoto(photos);
-    const photo = document.createElement("button");
-    photo.type = "button";
-    photo.className = "ops-receiving-photo";
-    photo.setAttribute("aria-label", latest ? "View receiving photo history" : "Add a receiving photo");
-    if (latest) {
-      const image = document.createElement("img");
-      image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(latest.attachment_id))}`;
-      image.alt = "Latest receiving photo";
-      image.loading = "lazy";
-      const copy = document.createElement("span"); copy.textContent = `${photos.length} photo${photos.length === 1 ? "" : "s"} attached`;
-      photo.append(image, copy);
-      photo.addEventListener("click", () => {
-        const history = $("ops-receiving-photo-history");
-        if (!history) return;
-        history.open = true;
-        history.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
-    } else {
-      const icon = document.createElement("i"); icon.className = "ph ph-camera"; icon.setAttribute("aria-hidden", "true");
-      const copy = document.createElement("span"); copy.textContent = "Add photo";
-      photo.append(icon, copy);
-      photo.addEventListener("click", () => $("ops-photo-file")?.click());
+    const lots = Array.isArray(next?.lots) ? next.lots.filter(isRecord) : [];
+    if (!lots.length) {
+      panel.append(emptyList("No current batches were returned for this case."));
+      return;
     }
-    const lotNames = (Array.isArray(next?.lots) ? next.lots : [])
-      .filter(isRecord)
-      .map((lot) => photoLotIdentifier(lot))
-      .filter(Boolean);
-    const unit = displayUnit(next?.quantities?.uom, "units");
-    const received = quantity(next, "received");
-    const usable = quantity(next, "usable");
-    const quantityLabel = finite(received)
-      ? `${formatNumber(received)} ${unit} received${finite(usable) ? ` · ${formatNumber(usable)} usable` : ""}`
-      : "Quantity unavailable";
-    const facts = document.createElement("div"); facts.className = "ops-receiving-facts";
-    facts.append(
-      receivingSummaryFact("Item", receivingItemCode(next, latest) || "Item unavailable"),
-      receivingSummaryFact("Lot", lotNames.length ? lotNames.join(", ") : "No current lot supplied"),
-      receivingSummaryFact("Quantity", quantityLabel),
-    );
-    panel.append(photo, facts);
+    const groups = [
+      ["attention", "Needs attention"],
+      ["passed", "Inspection passed"],
+    ];
+    groups.forEach(([groupKey, label]) => {
+      const values = lots.filter((lot) => batchState(next, lot).group === groupKey);
+      if (!values.length) return;
+      const group = document.createElement("section"); group.className = "ops-batch-group";
+      const heading = document.createElement("h3"); heading.textContent = label; group.append(heading);
+      const cards = document.createElement("div"); cards.className = "ops-batch-card-list";
+      values.forEach((lot) => {
+        const lotName = currentLotName(lot);
+        const photo = latestLotPhoto(next, lotName);
+        const state = batchState(next, lot);
+        const itemCode = batchItemCode(next, lot, photo);
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "ops-batch-card";
+        card.classList.toggle("is-selected", lotName === selectedProblemLot);
+        card.setAttribute("aria-pressed", lotName === selectedProblemLot ? "true" : "false");
+        card.setAttribute("aria-label", `${lotName}, ${state.label}`);
+        const media = document.createElement("span"); media.className = "ops-batch-photo";
+        if (photo) {
+          const image = document.createElement("img");
+          image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(photo.attachment_id))}`;
+          image.alt = `Operator-attached photo for ${lotName}; visible evidence only`;
+          image.loading = "lazy";
+          media.append(image);
+        } else {
+          const icon = document.createElement("i"); icon.className = "ph ph-camera"; icon.setAttribute("aria-hidden", "true"); media.append(icon);
+        }
+        const copy = document.createElement("span"); copy.className = "ops-batch-card-copy";
+        const item = document.createElement("span"); item.className = "ops-batch-item"; item.textContent = batchItemLabel(itemCode);
+        const title = document.createElement("strong"); title.textContent = lotName || "Batch unavailable";
+        const quantity = document.createElement("span"); quantity.className = "ops-batch-quantity"; quantity.textContent = batchQuantityLabel(lot, displayUnit(next?.quantities?.uom));
+        copy.append(item, title, quantity);
+        const status = document.createElement("span"); status.className = `state-badge state-${state.tone}`; status.textContent = state.label;
+        card.append(media, copy, status);
+        card.addEventListener("click", () => applyProblemLot(next, lotName, { target: "ops-selected-batch" }));
+        cards.append(card);
+      });
+      group.append(cards); panel.append(group);
+    });
+  }
+
+  function renderSelectedBatch(next) {
+    const panel = $("ops-selected-batch");
+    if (!panel) return;
+    const context = selectedProblemContext(next);
+    const lot = context.lotRecord;
+    panel.replaceChildren();
+    panel.hidden = !context.lot || !lot;
+    if (!context.lot || !lot) return;
+    const photo = latestLotPhoto(next, context.lot);
+    const state = batchState(next, lot);
+    const itemCode = batchItemCode(next, lot, photo);
+    const header = document.createElement("header"); header.className = "ops-selected-batch-header";
+    const heading = document.createElement("div");
+    const label = document.createElement("span"); label.className = "object-label"; label.textContent = "Photos & inspection";
+    const title = document.createElement("strong"); title.textContent = `${batchItemLabel(itemCode)} · ${context.lot}`;
+    heading.append(label, title);
+    const status = document.createElement("span"); status.className = `state-badge state-${state.tone}`; status.textContent = state.label;
+    header.append(heading, status); panel.append(header);
+    const body = document.createElement("div"); body.className = "ops-selected-batch-body";
+    if (photo) {
+      const image = document.createElement("img");
+      image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(photo.attachment_id))}`;
+      image.alt = `Operator-attached photo for ${context.lot}; visible evidence only`;
+      image.loading = "lazy";
+      body.append(image);
+    }
+    const facts = document.createElement("div"); facts.className = "ops-selected-batch-facts";
+    const quantity = document.createElement("span"); quantity.textContent = batchQuantityLabel(lot, displayUnit(next?.quantities?.uom));
+    const photoState = document.createElement("span");
+    photoState.textContent = photo ? photoIsCurrent(photo) ? "Current photo" : "Earlier photo" : "No photo attached";
+    facts.append(quantity, photoState); body.append(facts); panel.append(body);
+    const actions = document.createElement("div"); actions.className = "ops-selected-batch-actions";
+    const review = document.createElement("button"); review.type = "button"; review.className = "button button-quiet"; review.textContent = "Review this batch";
+    review.addEventListener("click", () => {
+      if (photo) selectExistingPhoto(photo, next);
+      else {
+        $("ops-photo-analysis-details")?.setAttribute("open", "");
+        $("ops-photo-file")?.focus();
+      }
+    });
+    actions.append(review); panel.append(actions);
+    if (itemCode) {
+      const details = document.createElement("details"); details.className = "ops-selected-batch-details";
+      details.dataset.opsDisclosureKey = `batch:${context.lot}:details`;
+      const summary = document.createElement("summary"); summary.textContent = "Batch details";
+      const content = document.createElement("span"); content.textContent = `SKU ${itemCode}`;
+      details.append(summary, content); panel.append(details);
+    }
+  }
+
+  function renderReceivingSummary(next, photos = photoAttachmentList(next)) {
+    renderBatchCards(next);
+    renderSelectedBatch(next);
+  }
+
+  function photoHistoryCard(photo, next) {
+    const card = document.createElement("article"); card.className = "ops-photo-card";
+    const preview = document.createElement("button"); preview.type = "button"; preview.className = "ops-photo-open";
+    const image = document.createElement("img");
+    image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(photo.attachment_id))}`;
+    image.alt = "Operator-attached receiving photo; visible evidence only";
+    image.loading = "lazy"; preview.append(image);
+    preview.setAttribute("aria-label", "Expand attached photo");
+    preview.addEventListener("click", () => {
+      const expanded = card.classList.toggle("is-expanded");
+      preview.setAttribute("aria-label", expanded ? "Collapse attached photo" : "Expand attached photo");
+    });
+    const copy = document.createElement("div");
+    const title = document.createElement("strong"); title.textContent = "Attached receiving evidence";
+    const photoPurpose = isRecord(photo.analysis) && text(photo.analysis.purpose)
+      ? ` · ${photoPurposeLabel(photo.analysis.purpose)}`
+      : "";
+    const linkedLot = photoLinkedLot(photo);
+    const linkedLotLabel = linkedLot ? ` · lot ${linkedLot}` : "";
+    const supersedes = isRecord(photo.analysis) ? firstText(photo.analysis, ["supersedes_attachment_id"]) : "";
+    const history = supersedes ? " · supersedes prior photo" : "";
+    const detail = document.createElement("small"); detail.textContent = isRecord(photo.analysis)
+      ? `Case photo · ${pretty(photoAnalysisStatus(photo.analysis) || "analysis status unavailable")}${photoPurpose}${linkedLotLabel}${history} · attachment record ${formatDate(photo.recorded_at)}`
+      : `Case photo · ${text(photo.interpretation) === "NOT_ANALYZED" ? "not analyzed" : "status unavailable"} · attachment record ${formatDate(photo.recorded_at)}`;
+    const review = document.createElement("button"); review.type = "button"; review.className = "button button-quiet ops-photo-review";
+    review.textContent = "Review / retry this photo";
+    review.disabled = photoAnalysisPending || processingEvent;
+    review.addEventListener("click", () => selectExistingPhoto(photo, next));
+    copy.append(title, detail, review); card.append(preview, copy); renderPhotoAnalysis(card, photo, next); return card;
+  }
+
+  function renderPhotoHistoryList(list, photos, next, emptyMessage) {
+    if (!list) return;
+    if (!photos.length) {
+      list.replaceChildren(emptyList(emptyMessage));
+      return;
+    }
+    list.replaceChildren(...photos.map((photo) => photoHistoryCard(photo, next)));
   }
 
   function renderPhotos(next) {
@@ -4673,51 +5361,19 @@
     } else {
       renderPhotoReviewCard(reviewCard, next);
     }
-    const photos = photoAttachmentList(next);
-    renderReceivingSummary(next, photos);
+    const allPhotos = orderedPhotosForContext(next, photoAttachmentList(next));
+    const context = selectedProblemContext(next);
+    const selectedPhotos = context.lot ? linkedLotPhotos(next, context.lot) : [];
+    const photos = dashboard ? allPhotos : selectedPhotos;
+    renderReceivingSummary(next, allPhotos);
     setText("ops-photos-count", photos.length ? `${photos.length} photo${photos.length === 1 ? "" : "s"}` : "No photos");
-    if (!photos.length) {
-      if (dashboard) { list.replaceChildren(renderPhotoDashboardEmpty()); return; }
-      const absence = document.createElement("div"); absence.className = "ops-evidence-absence";
-      const icon = document.createElement("i"); icon.className = "ph ph-image-square"; icon.setAttribute("aria-hidden", "true");
-      const copy = document.createElement("div");
-      const title = document.createElement("strong"); title.textContent = "No attached receiving evidence";
-      const detail = document.createElement("span"); detail.textContent = "No same-case source-backed photo is available. Image claims are not inferred.";
-      copy.append(title, detail); absence.append(icon, copy); list.replaceChildren(absence); return;
+    if (dashboard) {
+      if (allPhotos.length) list.replaceChildren(renderDashboardPhoto(latestPhoto(allPhotos), next));
+      else list.replaceChildren(renderPhotoDashboardEmpty());
+      return;
     }
-    if (dashboard) { list.replaceChildren(renderDashboardPhoto(latestPhoto(photos), next)); return; }
-    list.replaceChildren(...photos.map((photo) => {
-      const card = document.createElement("article"); card.className = "ops-photo-card";
-      const preview = document.createElement("button"); preview.type = "button"; preview.className = "ops-photo-open";
-      const image = document.createElement("img");
-      image.src = `${API_PATH}/photo?id=${encodeURIComponent(text(photo.attachment_id))}`;
-      image.alt = "Operator-attached receiving photo; visible evidence only";
-      image.loading = "lazy"; preview.append(image);
-      preview.setAttribute("aria-label", "Expand attached photo");
-      preview.addEventListener("click", () => {
-        const expanded = card.classList.toggle("is-expanded");
-        preview.setAttribute("aria-label", expanded ? "Collapse attached photo" : "Expand attached photo");
-      });
-      const copy = document.createElement("div");
-      const title = document.createElement("strong"); title.textContent = "Attached receiving evidence";
-      const photoPurpose = isRecord(photo.analysis) && text(photo.analysis.purpose)
-        ? ` · ${photoPurposeLabel(photo.analysis.purpose)}`
-        : "";
-      const linkedLot = isRecord(photo.analysis) && text(photo.analysis.linkage_source).toUpperCase() === "OPERATOR_SELECTED"
-        ? firstText(photo.analysis, ["linked_lot"])
-        : "";
-      const linkedLotLabel = linkedLot ? ` · lot ${linkedLot}` : "";
-      const supersedes = isRecord(photo.analysis) ? firstText(photo.analysis, ["supersedes_attachment_id"]) : "";
-      const history = supersedes ? " · supersedes prior photo" : "";
-      const detail = document.createElement("small"); detail.textContent = isRecord(photo.analysis)
-        ? `Case photo · ${pretty(photoAnalysisStatus(photo.analysis) || "analysis status unavailable")}${photoPurpose}${linkedLotLabel}${history} · attachment record ${formatDate(photo.recorded_at)}`
-        : `Case photo · ${text(photo.interpretation) === "NOT_ANALYZED" ? "not analyzed" : "status unavailable"} · attachment record ${formatDate(photo.recorded_at)}`;
-      const review = document.createElement("button"); review.type = "button"; review.className = "button button-quiet ops-photo-review";
-      review.textContent = "Review / retry this photo";
-      review.disabled = photoAnalysisPending || processingEvent;
-      review.addEventListener("click", () => selectExistingPhoto(photo, next));
-      copy.append(title, detail, review); card.append(preview, copy); renderPhotoAnalysis(card, photo, next); return card;
-    }));
+    renderPhotoHistoryList(list, selectedPhotos, next, "No attached photo for this batch.");
+    renderPhotoHistoryList($("ops-all-case-photos-list"), allPhotos, next, "No attached case photos.");
   }
 
   function resetSelectedPhoto({ clearInput = true } = {}) {
@@ -5027,6 +5683,7 @@
   }
 
   function renderProjection(value, { skipConversation = asking, resetEventFields = false } = {}) {
+    const disclosures = openDisclosureKeys();
     const base = normalizeProjection(value);
     const previousCaseId = projection?.case_id;
     const sourceCaseChanged = Boolean(previousCaseId && base.case_id && previousCaseId !== base.case_id);
@@ -5052,14 +5709,23 @@
     synchronizeChatTranscript(next, { caseChanged });
     persistConversation(retainedConversation);
     syncPendingAllocationState(next, caseChanged);
+    const requestedLot = requestedProblemLot();
+    selectedProblemLot = resolveSelectedProblemLot(next);
+    if (selectedProblemLot !== requestedLot) {
+      const url = new URL(window.location.href);
+      if (selectedProblemLot) url.searchParams.set("lot", selectedProblemLot);
+      else url.searchParams.delete("lot");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }
     projection = next;
+    reconcileAgentPhotoContext(next);
     if (next.available) {
       lastProjectionAt = new Date().toISOString();
     }
     renderRefreshState();
     document.body.dataset.operationsState = next.available ? "ready" : "disabled";
     renderHeaderIncidentState(next);
-    setText("ops-case-label", purchaseOrderDisplay(next) || next.case_label || (next.available ? "Current operation" : "PO unavailable"));
+    renderIncidentStrip(next);
     setText("ops-case-id", next.case_id || "Case identifier unavailable");
     setText("ops-case-po", purchaseOrderDisplay(next) || "Purchase order unavailable");
     const stageLabel = deliveryCompletionLabel(next) || pretty(next.stage);
@@ -5091,6 +5757,7 @@
       updateEventButton();
       syncFreshEventControls(next);
       updateAskButton();
+      if (!caseChanged) restoreOpenDisclosures(disclosures);
       return;
     }
     disabled.hidden = true;
@@ -5113,8 +5780,12 @@
     renderPhotos(next);
     renderPreparedProposal(next);
     renderAgentAssist(next);
+    renderLotContext(next, "ops-problem-lot-findings");
+    renderAgentCaseBrief(next);
+    renderIncidentWorkflow(next);
     if (!skipConversation) renderConversation(next);
     updateEventButton();
+    if (!caseChanged) restoreOpenDisclosures(disclosures);
   }
 
   async function requestJSON(path, options = {}) {
@@ -5214,7 +5885,34 @@
       || preparingEconomic
       || photoAnalysisPending
       || asking
+      || erpCheckInFlight
       || pendingAllocationAction?.inFlight === true;
+  }
+
+  function renderErpCheckControl() {
+    const button = $("ops-check-erp");
+    if (!button) return;
+    const current = text(projection?.evidence_mode?.status).toUpperCase() === "CURRENT";
+    button.disabled = erpCheckInFlight || loading || (!erpCheckInFlight && foregroundOperationInFlight());
+    button.innerHTML = erpCheckInFlight
+      ? '<i class="ph ph-spinner-gap" aria-hidden="true"></i>Checking…'
+      : '<i class="ph ph-arrow-clockwise" aria-hidden="true"></i>Check ERP';
+    button.title = lastErpCheckAt
+      ? `${current ? "Current ERP read" : "Retained or unavailable source"} checked ${formatDate(lastErpCheckAt)}`
+      : "Read current case records";
+  }
+
+  async function checkErp() {
+    if (erpCheckInFlight || loading || foregroundOperationInFlight()) return;
+    erpCheckInFlight = true;
+    renderErpCheckControl();
+    try {
+      await refresh({ silent: true });
+    } finally {
+      erpCheckInFlight = false;
+      renderErpCheckControl();
+      if (projection) renderEvidenceDrawer(projection);
+    }
   }
 
   async function refresh({ silent = false, periodic = false } = {}) {
@@ -5234,6 +5932,7 @@
       if (configuredProjection) economicConfigured = isRecord(configuredProjection.economic_proposal);
       const next = unwrapProjection(payload);
       if (!next) throw new Error("The source returned no distributor operation projection.");
+      lastErpCheckAt = new Date().toISOString();
       renderProjection(next);
       return true;
     } catch (error) {
@@ -5242,6 +5941,7 @@
       return false;
     } finally {
       loading = false;
+      renderErpCheckControl();
       if (refreshQueued) { refreshQueued = false; void refresh({ silent: true }); }
     }
   }
@@ -5371,6 +6071,8 @@
     }
   });
   $("ops-retry").addEventListener("click", () => { void refresh(); });
+  $("ops-check-erp")?.addEventListener("click", () => { void checkErp(); });
+  $("ops-open-erp-records")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
   $("ops-open-evidence-drawer")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
   $("ops-economic-compare")?.addEventListener("click", () => { void compareEconomicProposal(); });
   $("ops-economic-open-evidence")?.addEventListener("click", (event) => openEvidenceDrawer(event.currentTarget));
@@ -5399,8 +6101,13 @@
       event.preventDefault();
       const view = text(link.dataset.opsViewLink) || "dashboard";
       const url = new URL(link.href, window.location.href);
+      if (!url.searchParams.get("lot") && projection && currentLotNames(projection).includes(selectedProblemLot)) {
+        url.searchParams.set("lot", selectedProblemLot);
+      }
       window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      if (projection) selectedProblemLot = resolveSelectedProblemLot(projection);
       setOpsView(view, { scrollTarget: text(url.hash).replace(/^#/, "") });
+      if (projection) renderProblemLotSurfaces(projection);
     });
   });
   document.querySelectorAll(".ops-overview-links a").forEach((link) => {
@@ -5415,7 +6122,18 @@
   bindCollapsiblePanel("ops-photos-panel", "ops-photo-history-toggle");
   function syncOpsViewFromLocation() {
     const target = text(window.location.hash).replace(/^#/, "");
+    if (projection) {
+      const requested = requestedProblemLot();
+      selectedProblemLot = resolveSelectedProblemLot(projection);
+      if (requested !== selectedProblemLot) {
+        const url = new URL(window.location.href);
+        if (selectedProblemLot) url.searchParams.set("lot", selectedProblemLot);
+        else url.searchParams.delete("lot");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+    }
     setOpsView(requestedOpsView(), { scrollTarget: target, openAgent: requestedAgentDrawer() });
+    if (projection) renderProblemLotSurfaces(projection);
   }
   window.addEventListener("popstate", syncOpsViewFromLocation);
   window.addEventListener("hashchange", syncOpsViewFromLocation);
@@ -5452,12 +6170,13 @@
   });
   async function requestAskQuestion(question) {
     clearAskValidation();
-    appendChatMessage("user", question);
+    const contextualQuestion = contextualLotQuestion(question);
+    appendChatMessage("user", contextualQuestion);
     asking = true; $("ops-ask-submit").disabled = true; $("ops-ask-submit").textContent = "Thinking…";
     if (projection) renderConversation(projection);
     try {
-      const request = { question };
-      if (agentPhotoAttachmentId && agentPhotoCaseId === text(projection?.case_id)) {
+      const request = { question: contextualQuestion };
+      if (agentPhotoMatchesProblemLot(projection)) {
         request.photo_attachment_id = agentPhotoAttachmentId;
       }
       const response = await requestJSON(`${API_PATH}/assist`, { method: "POST", body: JSON.stringify(request) });
