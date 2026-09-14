@@ -126,6 +126,27 @@ The backend results above do not establish acceptance of the rejected UI.
 - Root reviewed the actual UI diff and ran JavaScript syntax and diff checks.
   No UI unit tests were added. The previous PO24 executor acceptance remains a
   separate run, not a dispatch result for this review case.
+- Browser recheck confirmed Dashboard `Review hold` now routes to Operations
+  and reveals the target alert. Benchmark disclosure shows the current case's
+  25-unit commitment and zero dispatched/confirmed; it does not invent a
+  historical comparison. Desktop and normal narrow-window layouts were viewed.
+
+## Economic comparison limitation discovered during UI acceptance
+
+The first Compare exhausted its total-token limit after four raw evidence
+reads. A single bounded experiment raised only that limit from 16,384 to
+20,480; five existing economics checks, Ruff and format checks passed.
+After restarting the server, one real browser recheck again ended with
+`limit_total_tokens` (22,305 input / 2,148 output tokens, four requests,
+32.243 s). This failed experiment is not a validated fix and must not be
+promoted. Both failures are preserved locally; the second is
+`/private/tmp/logisticpilot-review-budget-recheck.json`.
+
+The successful Prepare comparison above is a distinct recorded outcome, not
+evidence that Compare is reliable. No further live rerolls were performed.
+Review cumulative multi-turn evidence size and model/tool completion budgeting
+before another candidate change. The interface separation is delivered, but
+unqualified end-to-end reliability or recording readiness is not claimed.
 
 ## Original acceptance checklist
 
