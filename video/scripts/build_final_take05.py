@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -21,9 +22,55 @@ MEDIA = Path("/Users/danielwan/Documents/LogisticPilot-media")
 OUTPUT = MEDIA / "logisticpilot-devpost-final-v1.mp4"
 WORK = Path("/private/tmp/logisticpilot-final-take05")
 CROP = "crop=1527:859:196:133,scale=1920:1080:flags=lanczos,setsar=1"
-VOICE_SPEED = "1.29"
-BODY_DURATION = 220.927
-FINAL_DURATION = 267.946
+# The opening file's audio ends at 47.018667 seconds; narration intentionally
+# begins at the next millisecond, after the untouched opening audio finishes.
+NARRATION_START = 47.019
+OPENING_AUDIO_DURATION = 47.018667
+NARRATION_TEMPO = 1.20
+BODY_DURATION = 237.497
+FINAL_DURATION = 284.516
+AUDIO_FADE_SECONDS = 0.015
+
+
+@dataclass(frozen=True)
+class NarrationSegment:
+    """A speech-safe source slice placed at an auditable final-film time."""
+
+    label: str
+    scene: str
+    source_start: float
+    source_end: float
+    final_start: float
+    tempo: float
+
+    @property
+    def duration(self) -> float:
+        return (self.source_end - self.source_start) / self.tempo
+
+
+# Whisper/silencedetect-safe anchors from the recorded TAKE05 voiceover.  These
+# slices are contiguous: the full narration remains intact, while the live
+# visuals change at the matching source meaning rather than at a global 1.29x
+# timestamp.  The displayed final starts round to 47.019, 63.862, 68.397,
+# 81.425, 103.466, 124.850, 145.592, 155.233, 168.126, 184.277, 201.376,
+# 216.090, 229.322, 242.261, and 266.459 seconds.
+NARRATION_SEGMENTS = (
+    NarrationSegment("baseline", "01-baseline", 0.000, 20.211, 47.019000, 1.20),
+    NarrationSegment("upload", "02-upload", 20.211, 25.653, 63.861500, 1.20),
+    NarrationSegment("nova", "03-nova-result", 25.653, 41.287, 68.396500, 1.20),
+    NarrationSegment("agent-evidence", "04-05-agent-evidence", 41.287, 67.736, 81.424833, 1.20),
+    NarrationSegment("agent-consequence", "06-07-agent-consequence", 67.736, 93.397, 103.465667, 1.20),
+    NarrationSegment("agent-plan", "08-09-agent-plan", 93.397, 118.288, 124.849500, 1.20),
+    NarrationSegment("approval-review", "10-approval-review", 118.288, 129.857, 145.592000, 1.20),
+    NarrationSegment("after-manager", "11-approval-ready", 129.857, 145.328, 155.233167, 1.20),
+    NarrationSegment("applied-result", "12-final-dashboard", 145.328, 164.710, 168.125667, 1.20),
+    NarrationSegment("erp", "13-erpnext-readback", 164.710, 185.228, 184.277333, 1.20),
+    NarrationSegment("airtable", "14-airtable-readback", 185.228, 202.885, 201.375667, 1.20),
+    NarrationSegment("jira", "15-jira-readback", 202.885, 218.763, 216.089500, 1.20),
+    NarrationSegment("slack", "16-slack-readback", 218.763, 234.290, 229.321500, 1.20),
+    NarrationSegment("economic-close", "17-dashboard-close", 234.290, 263.328, 242.260667, 1.20),
+    NarrationSegment("closing-summary", "18-end-card", 263.328, 284.995875, 266.459000, 1.20),
+)
 
 
 def run(*args: str) -> None:
@@ -71,21 +118,32 @@ def make_live_clip(
     start: float,
     duration: float,
     confirmation_toast: Path | None = None,
+    source_duration: float | None = None,
 ) -> Path:
     destination = WORK / f"{name}.mp4"
+    source_duration = duration if source_duration is None else source_duration
+    if not 0 < source_duration <= duration:
+        raise ValueError(f"{name}: source duration must be in (0, output duration]")
     # ScreenCaptureKit writes a VFR stream.  Trim *after* normalising timestamps
     # and frame rate; input-level -t otherwise produces nondeterministic lengths.
     command = ["ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     filter_complex = (
-        f"[0:v]setpts=PTS-STARTPTS,{CROP},fps=30,trim=duration={duration:.3f},setpts=PTS-STARTPTS[base]"
+        f"[0:v]setpts=PTS-STARTPTS,{CROP},fps=30,trim=duration={source_duration:.6f},setpts=PTS-STARTPTS[base]"
     )
+    if source_duration < duration:
+        filter_complex += (
+            f";[base]tpad=stop_mode=clone:stop_duration={duration - source_duration:.6f},"
+            f"trim=duration={duration:.6f},setpts=PTS-STARTPTS[timed]"
+        )
+    else:
+        filter_complex += f";[base]trim=duration={duration:.6f},setpts=PTS-STARTPTS[timed]"
     if confirmation_toast is None:
-        filter_complex += f";[base]trim=duration={duration:.3f}[v]"
+        filter_complex += ";[timed]null[v]"
     else:
         toast_start = duration - 2.5
         command.extend(["-loop", "1", "-framerate", "30", "-i", str(confirmation_toast)])
         filter_complex += (
-            ";[base][1:v]overlay=0:0:format=auto:"
+            ";[timed][1:v]overlay=0:0:format=auto:"
             f"enable='between(t,{toast_start:.3f},{duration:.3f})',trim=duration={duration:.3f}[v]"
         )
     command.extend([
@@ -97,17 +155,107 @@ def make_live_clip(
     return destination
 
 
-def make_graphic_clip(name: str, source: Path, start: float, duration: float) -> Path:
+def make_graphic_clip(
+    name: str,
+    source: Path,
+    start: float,
+    duration: float,
+    source_duration: float | None = None,
+) -> Path:
     destination = WORK / f"{name}.mp4"
+    source_duration = duration if source_duration is None else source_duration
+    if not 0 < source_duration <= duration:
+        raise ValueError(f"{name}: source duration must be in (0, output duration]")
+    tail = ""
+    if source_duration < duration:
+        tail = f",tpad=stop_mode=clone:stop_duration={duration - source_duration:.6f}"
     run(
         "ffmpeg", "-y", "-ss", f"{start:.3f}", "-i", str(source),
         "-vf",
         "setpts=PTS-STARTPTS,scale=1920:1080:force_original_aspect_ratio=decrease,"
-        f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x0b1f16,setsar=1,fps=30,trim=duration={duration:.3f},setpts=PTS-STARTPTS",
+        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x0b1f16,setsar=1,fps=30,"
+        f"trim=duration={source_duration:.6f}{tail},trim=duration={duration:.6f},setpts=PTS-STARTPTS",
         "-an", "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
         "-movflags", "+faststart", str(destination),
     )
     return destination
+
+
+def tempo_chain(tempo: float) -> str:
+    """Keep every atempo stage in ffmpeg's supported 0.5–2.0 range."""
+    if tempo <= 0:
+        raise ValueError("tempo must be positive")
+    stages: list[str] = []
+    remainder = tempo
+    while remainder > 2.0:
+        stages.append("atempo=2.0")
+        remainder /= 2.0
+    while remainder < 0.5:
+        stages.append("atempo=0.5")
+        remainder /= 0.5
+    stages.append(f"atempo={remainder:.9f}")
+    return ",".join(stages)
+
+
+def validate_narration_manifest() -> float:
+    """Fail early if a source word would be omitted, duplicated, or overlapped."""
+    if abs(NARRATION_SEGMENTS[0].source_start) > 1e-6:
+        raise ValueError("Narration must start at source time 0")
+    if abs(NARRATION_SEGMENTS[0].final_start - NARRATION_START) > 1e-6:
+        raise ValueError("Narration must start at the end of the opener")
+    source_cursor = 0.0
+    final_cursor = NARRATION_START
+    for segment in NARRATION_SEGMENTS:
+        if not 0 < segment.tempo <= 1.25:
+            raise ValueError(f"{segment.label}: tempo must stay at or below 1.25")
+        if abs(segment.source_start - source_cursor) > 0.001:
+            raise ValueError(f"{segment.label}: source manifest is not contiguous")
+        if abs(segment.final_start - final_cursor) > 0.001:
+            raise ValueError(f"{segment.label}: final start does not match its prior segment")
+        source_cursor = segment.source_end
+        final_cursor = segment.final_start + segment.duration
+    if abs(source_cursor - 284.995875) > 0.001:
+        raise ValueError("Narration manifest does not cover the recorded voiceover")
+    if final_cursor > FINAL_DURATION + 1e-6:
+        raise ValueError("Narration exceeds the final duration")
+    return final_cursor
+
+
+def make_mixed_audio(opening: Path, voice: Path, destination: Path) -> None:
+    """Concatenate exact timeline slices; no delayed global voice/amix gate."""
+    narration_end = validate_narration_manifest()
+    opening_gap = NARRATION_START - OPENING_AUDIO_DURATION
+    tail_gap = FINAL_DURATION - narration_end
+    labels = [f"[voice{index}]" for index in range(len(NARRATION_SEGMENTS))]
+    filters = [
+        f"[0:a]atrim=duration={OPENING_AUDIO_DURATION:.6f},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo[opening]",
+        f"[1:a]asplit={len(labels)}{''.join(labels)}",
+        f"anullsrc=r=48000:cl=stereo:d={opening_gap:.9f}[opening-gap]",
+    ]
+    timeline_labels = ["[opening]", "[opening-gap]"]
+    for index, segment in enumerate(NARRATION_SEGMENTS):
+        fade_out_start = max(0.0, segment.duration - AUDIO_FADE_SECONDS)
+        label = f"[speech{index}]"
+        filters.append(
+            f"[voice{index}]atrim=start={segment.source_start:.6f}:end={segment.source_end:.6f},"
+            f"asetpts=PTS-STARTPTS,aresample=48000,{tempo_chain(segment.tempo)},"
+            f"afade=t=in:st=0:d={AUDIO_FADE_SECONDS:.3f},"
+            f"afade=t=out:st={fade_out_start:.6f}:d={AUDIO_FADE_SECONDS:.3f},"
+            f"atrim=duration={segment.duration:.9f},asetpts=PTS-STARTPTS{label}"
+        )
+        timeline_labels.append(label)
+    if tail_gap > 0:
+        filters.append(f"anullsrc=r=48000:cl=stereo:d={tail_gap:.9f}[tail-gap]")
+        timeline_labels.append("[tail-gap]")
+    filters.append(
+        f"{''.join(timeline_labels)}concat=n={len(timeline_labels)}:v=0:a=1,"
+        f"atrim=duration={FINAL_DURATION:.6f},asetpts=PTS-STARTPTS[a]"
+    )
+    run(
+        "ffmpeg", "-y", "-i", str(opening), "-i", str(voice),
+        "-filter_complex", ";".join(filters), "-map", "[a]",
+        "-c:a", "aac", "-b:a", "192k", str(destination),
+    )
 
 
 def main() -> int:
@@ -140,27 +288,27 @@ def main() -> int:
     confirmation_toast = WORK / "approval-confirmation-toast.png"
     make_confirmation_toast(confirmation_toast)
 
-    # These ranges retain the causal live flow: upload -> Nova observation ->
-    # three Strands questions/answers -> manager-ready approval. Network/model
-    # response waits are removed in the edit.
+    # Each cut starts with the narration source meaning it shows.  Static proof
+    # panes are held on their last clean frame rather than leaking a future app.
     live_ranges = [
-        ("01-baseline", required["main"], 0, 20),
-        ("02-upload", required["main"], 25, 19),
-        ("03-nova-result", required["main"], 90, 14),
-        ("04-agent-question-1", required["main"], 115, 12),
-        ("05-agent-answer-1", required["main"], 150, 14),
-        ("06-agent-question-2", required["main"], 180, 10),
-        ("07-agent-answer-2", required["main"], 210, 14),
-        ("08-agent-question-3", required["main"], 240, 11),
-        ("09-agent-answer-3", required["main"], 275, 16),
-        ("10-approval-review", required["main"], 340, 19),
-        ("11-approval-ready", required["main"], 400, 23.927),
-        ("12-final-dashboard", required["proof"], 0, 5),
-        ("13-erpnext-readback", required["proof"], 18, 6),
-        ("14-airtable-readback", required["proof"], 31, 6),
-        ("15-jira-readback", required["jira"], 37, 6),
-        ("16-slack-readback", required["slack"], 12, 6),
-        ("17-dashboard-close", required["proof"], 0, 7),
+        ("01-baseline", required["main"], 0, 16.842500, None),
+        ("02-upload", required["main"], 25, 4.535000, None),
+        ("03-nova-result", required["main"], 90, 13.028333, None),
+        ("04-agent-question-1", required["main"], 115, 10.000000, None),
+        ("05-agent-answer-1", required["main"], 150, 12.040833, None),
+        ("06-agent-question-2", required["main"], 180, 9.500000, None),
+        ("07-agent-answer-2", required["main"], 220, 11.883833, 7.000000),
+        ("08-agent-question-3", required["main"], 240, 9.000000, None),
+        ("09-agent-answer-3", required["main"], 340.0, 11.742500, None),
+        ("10-approval-review", required["main"], 340, 9.641167, None),
+        # This remains within the reviewed clean 400–423.927 manager panel.
+        ("11-approval-ready", required["main"], 400, 12.892500, None),
+        ("12-final-dashboard", required["proof"], 0, 16.151666, 5.000000),
+        ("13-erpnext-readback", required["proof"], 18, 17.098334, 6.000000),
+        ("14-airtable-readback", required["proof"], 31, 14.713833, 6.000000),
+        ("15-jira-readback", required["jira"], 40.0, 13.232000, 6.000000),
+        ("16-slack-readback", required["slack"], 12, 12.939167, 6.000000),
+        ("17-dashboard-close", required["proof"], 0, 21.439333, 7.000000),
     ]
     clips = [
         make_live_clip(
@@ -169,10 +317,13 @@ def main() -> int:
             start,
             duration,
             confirmation_toast if name == "11-approval-ready" else None,
+            source_duration,
         )
-        for name, source, start, duration in live_ranges
+        for name, source, start, duration, source_duration in live_ranges
     ]
-    clips.append(make_graphic_clip("18-end-card", required["end"], 0, 12))
+    # Economic close remains on the dashboard until 263.700; the final summary
+    # begins on the end card at 266.459 and the card holds through 284.516.
+    clips.append(make_graphic_clip("18-end-card", required["end"], 0, 20.816, 12.0))
 
     # Every source fragment is already CFR and zero-based.  Still concatenate
     # through the filter graph rather than stream-copying a list: macOS VFR
@@ -191,18 +342,11 @@ def main() -> int:
     ])
     run(*body_inputs)
 
-    # Build the audio separately.  Rendering the delayed MP3 inside the video
-    # concat caused ffmpeg's shortest-output gate to cut the closing card early
-    # on this macOS build, even though the filtered audio itself was longer.
+    # Build the audio separately from independently timed, speech-safe clips.
+    # The concat timeline has no amix duration gate, so exact end-card duration
+    # cannot be shortened by a delayed global voiceover stream.
     mixed_audio = WORK / "mixed-audio.m4a"
-    run(
-        "ffmpeg", "-y", "-i", str(required["opening"]), "-i", str(required["voice"]),
-        "-filter_complex",
-        "[0:a]afade=t=out:st=46.72:d=0.28[opener];"
-        f"[1:a]atempo={VOICE_SPEED},adelay=47019|47019,afade=t=out:st=267.65:d=0.28[voice];"
-        f"[opener][voice]amix=inputs=2:duration=longest:dropout_transition=0,apad=pad_dur=60,atrim=duration={FINAL_DURATION:.3f}[a]",
-        "-map", "[a]", "-c:a", "aac", "-b:a", "192k", str(mixed_audio),
-    )
+    make_mixed_audio(required["opening"], required["voice"], mixed_audio)
 
     # Opener keeps its existing visuals; the separately rendered narration starts
     # at its end and the visual concat supplies the authoritative final duration.

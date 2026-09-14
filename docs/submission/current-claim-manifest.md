@@ -19,11 +19,14 @@ POC receiving decision carried through live connected systems.
 The final-film brief is [TAKE05-FINAL.md](video-v2/TAKE05-FINAL.md). The final file
 is
 `/Users/danielwan/Documents/LogisticPilot-media/logisticpilot-devpost-final-v1.mp4`.
-It received a final PASS from independent review and is approved for publishing: SHA256
-`9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`; 267.946 seconds;
-H.264 1920 × 1080 at 30 fps with AAC audio; successful full decode; and no sensitive
-leak or black interval. The off-camera approval-click limitation is disclosed and was
-non-blocking in the review.
+The resynchronized export uses semantic scene-level narration timing rather than a
+global 1.29× speed-up. Objective export verification passed: SHA256
+`10aa5fddadf56c411b7bff8fcdba0d8eaf99aa7edcc739efe503053b3f53ea81`, 284.501 seconds;
+H.264 1920 × 1080 at 30 fps with AAC stereo; and successful full decode. Independent
+Astra film/claims review passed this resynchronized export: q2 at 120s, q3 at 140s,
+and Jira at 216.1s were aligned; prior ERPNext/Airtable/Slack, end-card, privacy,
+crop, and badge checks remained clean. The off-camera approval-click limitation
+remains disclosed.
 
 ## Supported and unsupported claims
 
@@ -48,8 +51,9 @@ non-blocking in the review.
   records. It does not show the approval click.
 - “Dispatched” means a recorded demo-system state. “Delivery-confirmed: 0” means the
   film does not establish a completed delivery.
-- The independently reviewed final export is 267.946 seconds and under five minutes.
-  Its SHA256 identifies the exact PASS-reviewed MP4 for publication.
+- The current resynchronized export is 284.501 seconds and under five minutes. Its
+  SHA256 identifies the exact independently reviewed MP4; publication approval and
+  public upload remain pending.
 - The connected tenant, credentials, and matching runtime journal are private. A
   clean clone can run repository checks but cannot replay this live business event.
 

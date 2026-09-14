@@ -28,12 +28,13 @@ confirmation click is off-camera.
 TAKE05 uses synthetic POC business records in live connected systems. “Dispatched”
 is a recorded demo-system state, not a claim of physical shipment, delivery, revenue,
 or realized savings. The $24.80 postage difference is a conditional scenario
-estimate. The final MP4 received a final PASS from independent review and is approved
-for publishing:
-SHA256 `9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`,
-267.946 seconds, H.264 1920 × 1080 at 30 fps with AAC audio. The review confirmed a
-full decode with no sensitive leak or black interval; the off-camera click limitation
-is disclosed and non-blocking.
+estimate. The resynchronized final MP4 uses semantic scene-level narration timing
+rather than a global 1.29× speed-up. Objective export verification passed: SHA256
+`10aa5fddadf56c411b7bff8fcdba0d8eaf99aa7edcc739efe503053b3f53ea81`, 284.501 seconds,
+H.264 1920 × 1080 at 30 fps with AAC stereo, and full decode. Independent Astra
+film/claims review passed the resynchronized export: q2 at 120s, q3 at 140s, and Jira
+at 216.1s were aligned, with prior ERPNext/Airtable/Slack, end-card, privacy, crop,
+and badge checks still clean. The off-camera click limitation remains disclosed.
 
 ## Historical repository context
 
@@ -262,8 +263,8 @@ make judge-demo
 ```
 
 The credential-free `make check` gate is the repository quality check. The current
-TAKE05 film received a final PASS for its exact SHA256-listed MP4; passing offline
-checks does not turn synthetic delivery confirmation into physical-receipt proof.
+TAKE05 film has objective export verification for its exact SHA256-listed MP4; passing
+offline checks does not turn synthetic delivery confirmation into physical-receipt proof.
 
 Targeted proof:
 

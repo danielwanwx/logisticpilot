@@ -1,6 +1,6 @@
 # Final publication metadata — LogisticPilot TAKE05
 
-Status: **independent film/claims review PASS for the current badge-repaired export; public upload and judging-access checks remain open.**
+Status: **independent film/claims review PASS for the resynchronized export; public upload and judging-access checks remain open.**
 This file is the copy source for the public video and Devpost entry. It describes
 TAKE05 only; earlier PO20, PO25, and PO26 cases are historical evidence.
 
@@ -10,12 +10,14 @@ TAKE05 only; earlier PO20, PO25, and PO26 cases are historical evidence.
   `/Users/danielwan/Documents/LogisticPilot-media/logisticpilot-devpost-final-v1.mp4`
 - Expected format: H.264, 1920 × 1080, 30 fps, AAC audio, under five minutes.
 - Verified current export: SHA256
-  `9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`; 267.946 seconds
-  (4:27.946); H.264, 1920 × 1080, 30 fps; AAC stereo; full-stream decode passed.
-- Independent film/claims review: **PASS**. No sensitive leak or black interval was
-  found. The known off-camera confirmation-click limitation is disclosed and
-  non-blocking. The audio result records stream metadata and successful decode; it does
-  not claim an audio-listening review.
+  `10aa5fddadf56c411b7bff8fcdba0d8eaf99aa7edcc739efe503053b3f53ea81`; 284.501 seconds
+  (4:44.501); H.264, 1920 × 1080, 30 fps; AAC stereo; full-stream decode passed.
+  Narration is resynchronized by semantic scene rather than a global 1.29× speed-up.
+- Independent Astra film/claims review: **PASS** for this resynchronized export. The
+  review confirmed semantic alignment at q2 (120s), q3 (140s), and Jira (216.1s), and
+  retained the earlier clean ERPNext, Airtable, Slack, end-card, privacy, crop, and
+  badge checks. Full decode passed; the known off-camera confirmation-click limitation
+  remains disclosed.
 - Current film facts and review boundary:
   [TAKE05-FINAL.md](video-v2/TAKE05-FINAL.md) and the
   [current claim manifest](current-claim-manifest.md).
@@ -115,13 +117,15 @@ evidence boundary, read the README, the
 
 ### Video
 
-- [x] Verify the current badge-repaired MP4: SHA256
-  `9c6293e0780e0b3f56aab9ba20d5213b860b85a5bc178d72638bc58dc31df9bc`; 267.946 seconds;
+- [x] Verify the current resynchronized MP4: SHA256
+  `10aa5fddadf56c411b7bff8fcdba0d8eaf99aa7edcc739efe503053b3f53ea81`; 284.501 seconds;
   H.264, 1920 × 1080, 30 fps; AAC stereo; and full-stream decode passed. This records
   stream metadata and decode, without claiming an audio-listening review.
-- [x] Obtain and record an independent review of the current export. The
-  film/claims verdict is **PASS**, with no sensitive leak or black interval; the known
-  off-camera confirmation-click limitation is disclosed and non-blocking.
+- [x] Obtain and record an independent film/claims review of the resynchronized
+  export, including semantic A/V sync. Astra review passed q2 at 120s, q3 at 140s,
+  and Jira at 216.1s; prior ERPNext/Airtable/Slack, end-card, privacy, crop, and
+  badge checks remained clean, and the off-camera confirmation-click limitation is
+  recorded.
 - [x] Verify the visible story uses only TAKE05:
   `M20-DIST-ECONOMIC-TAKE05-20260914` / `PUR-ORD-2026-00031` /
   `SAL-ORD-2026-00025`.
