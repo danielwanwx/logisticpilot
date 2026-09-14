@@ -736,6 +736,7 @@ body.operations-shell .button-quiet { color: #415148; background: #fff; }
 .ops-economic-subheader { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .ops-economic-subheader .object-label { margin: 0; }
 .ops-text-button { padding: 0; border: 0; color: #28784a; background: transparent; font-size: 10px; font-weight: 680; text-decoration: underline; text-underline-offset: 3px; }
+#ops-economic-open-evidence { display: inline-flex; align-items: center; flex: 0 0 auto; font-size: 11px; font-weight: 600; line-height: 1.25; }
 .ops-text-button:hover { color: #125f31; }
 .ops-economic-evidence,
 .ops-economic-model,
@@ -1530,12 +1531,68 @@ body.operations-shell[data-ops-view="operations"] #ops-economic-panel { padding:
 body.operations-shell[data-ops-view="operations"] #ops-economic-panel > :not(.ops-economic-header) { display: block; }
 .ops-economic-outcome { margin-top: 16px; padding: 13px 14px; border: 1px solid #cfe4d4; border-radius: 11px; color: #1f5d35; background: #f1f8f2; font-size: 15px; font-weight: 720; }
 .ops-economic-execution-details { margin-top: 14px; color: #5d6d62; font-size: 11px; line-height: 1.45; }
-.ops-economic-execution-details > summary { cursor: pointer; color: #28784a; font-weight: 680; }
-.ops-economic-execution-details[open] > summary { margin-bottom: 8px; }
 .ops-economic-execution-details p { margin: 0; overflow-wrap: anywhere; }
 .ops-economic-decision-details { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2ece4; }
-.ops-economic-decision-details > summary { cursor: pointer; color: #28784a; font-size: 11px; font-weight: 680; }
-.ops-economic-decision-details[open] > summary { margin-bottom: 3px; }
+.ops-economic-details > summary,
+.ops-economic-execution-details > summary,
+.ops-economic-decision-details > summary,
+.ops-photo-review-inline-details > summary,
+.ops-selected-batch-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  color: #476654;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  list-style: none;
+}
+.ops-economic-details > summary::-webkit-details-marker,
+.ops-economic-execution-details > summary::-webkit-details-marker,
+.ops-economic-decision-details > summary::-webkit-details-marker,
+.ops-photo-review-inline-details > summary::-webkit-details-marker,
+.ops-selected-batch-details > summary::-webkit-details-marker { display: none; }
+.ops-economic-details > summary::marker,
+.ops-economic-execution-details > summary::marker,
+.ops-economic-decision-details > summary::marker,
+.ops-photo-review-inline-details > summary::marker,
+.ops-selected-batch-details > summary::marker { content: ""; }
+.ops-economic-details > summary::after,
+.ops-economic-execution-details > summary::after,
+.ops-economic-decision-details > summary::after,
+.ops-photo-review-inline-details > summary::after,
+.ops-selected-batch-details > summary::after {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: "";
+  transform: translateY(-2px) rotate(45deg);
+}
+.ops-economic-details[open] > summary::after,
+.ops-economic-execution-details[open] > summary::after,
+.ops-economic-decision-details[open] > summary::after,
+.ops-photo-review-inline-details[open] > summary::after,
+.ops-selected-batch-details[open] > summary::after { transform: translateY(2px) rotate(-135deg); }
+.ops-economic-details > summary:hover,
+.ops-economic-execution-details > summary:hover,
+.ops-economic-decision-details > summary:hover,
+.ops-photo-review-inline-details > summary:hover,
+.ops-selected-batch-details > summary:hover { color: #28784a; }
+.ops-economic-details > summary:focus-visible,
+.ops-economic-execution-details > summary:focus-visible,
+.ops-economic-decision-details > summary:focus-visible,
+.ops-photo-review-inline-details > summary:focus-visible,
+.ops-selected-batch-details > summary:focus-visible { outline: 2px solid rgb(55 174 96 / .26); outline-offset: 3px; border-radius: 5px; }
+.ops-economic-details[open] > summary,
+.ops-economic-execution-details[open] > summary,
+.ops-economic-decision-details[open] > summary,
+.ops-photo-review-inline-details[open] > summary,
+.ops-selected-batch-details[open] > summary { margin-bottom: 4px; }
 body.operations-shell .ops-economic-decision-details[open] .ops-economic-selection { display: block; }
 .ops-economic-difference { justify-content: flex-start; }
 .ops-economic-difference .ops-estimate-badge { margin-left: auto; padding: 4px 6px; border-radius: 999px; color: #587066; background: #e7f1e9; font-size: 9px; font-weight: 700; }
@@ -1668,6 +1725,8 @@ a.ops-agent-case-reference { color: #1f713f; text-decoration: underline; text-un
 #ops-photo-analysis-details { grid-column: 1 / -1; width: 100%; min-width: 0; }
 #ops-photo-analysis-details[open] { display: grid; gap: 10px; }
 #ops-photo-analysis-details .ops-photo-analysis-fields { width: 100%; }
+#ops-photo-review-inline-details { grid-column: 1 / -1; width: 100%; min-width: 0; }
+#ops-photo-review-inline-details > .ops-photo-review-inline { width: 100%; min-width: 0; }
 body.operations-shell[data-ops-view="operations"] #ops-receiving-photo-history-slot .ops-photos-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 @media (max-width: 840px) {
@@ -1726,8 +1785,6 @@ body.operations-shell[data-ops-view="operations"] #ops-receiving-photo-history-s
 .ops-selected-batch-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ops-selected-batch-actions .button { min-height: 40px; font-size: 12px; }
 .ops-selected-batch-details { color: #627167; font-size: 11px; }
-.ops-selected-batch-details > summary { cursor: pointer; color: #28784a; font-weight: 680; }
-.ops-selected-batch-details[open] > summary { margin-bottom: 6px; }
 .ops-all-case-photo-history { margin-top: 10px; }
 
 /* Drawers use the existing focus and backdrop controls as inset dialogs. */
