@@ -1,5 +1,7 @@
 # LogisticPilot — five-minute recording plan
 
+Current production discussion: [recording brief v3](recording-brief-v3.md) adds the proposed fresh-case scene, English voiceover, Remotion/screen-capture split and remaining recording gates. It is a plan, not a completed take.
+
 Target: **4:35–4:50**, English narration. One receiving exception, one customer order, partial fulfillment and a verified external record. This replaces the old Investigation/$42,000 invoice script. Do not mix those cases.
 
 ## One sentence

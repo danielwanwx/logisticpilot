@@ -1,5 +1,7 @@
 # PO19 distributor recording runbook
 
+> Historical PO19 runbook. For the current 25-part LogisticPilot film, use [recording brief v3](../demo/recording-brief-v3.md) and [the current claim manifest](current-claim-manifest.md). The readiness statements and cross-app records below belong to the older case.
+
 **Status: READY TO RECORD V1 as a bounded completed-case walkthrough.** Public
 video, judge access, upload, and submission are still incomplete. This is a 4:30
 English voiceover and screen-action template for the existing recorded
