@@ -1,0 +1,20 @@
+{
+  "name": "logisticpilot-architecture-preview",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.jsx",
+    "render": "remotion render src/index.jsx ArchitecturePreview out/architecture-preview.mp4 --codec=h264 --crf=17 --concurrency=2 --overwrite",
+    "still:photo": "remotion still src/index.jsx ArchitecturePreview out/stills/01-photo-and-erp.png --frame=75 --image-format=png --overwrite",
+    "still:reason": "remotion still src/index.jsx ArchitecturePreview out/stills/02-strands-agent.png --frame=255 --image-format=png --overwrite",
+    "still:confirm": "remotion still src/index.jsx ArchitecturePreview out/stills/03-check-and-confirm.png --frame=420 --image-format=png --overwrite",
+    "still:result": "remotion still src/index.jsx ArchitecturePreview out/stills/04-erpnext-readback.png --frame=640 --image-format=png --overwrite"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.524",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.524"
+  }
+}

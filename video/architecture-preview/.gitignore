@@ -1,0 +1,11 @@
+node_modules/
+*.mp4
+*.webm
+*.mov
+*.png
+*.jpg
+*.jpeg
+*.gif
+out/
+build/
+dist/
